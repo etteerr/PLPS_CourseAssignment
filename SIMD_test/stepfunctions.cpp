@@ -27,8 +27,8 @@ void stepEdge(adjData left, uchar* resLeft, adjData right, uchar * resRight) {
 
 
 
-	l.bits.a = ((l.bits.a & el==2) | (el==3));
-	r.bits.h = ((r.bits.h & er==2) | (er==3));
+	l.bits.a = ((l.bits.a & (el==2)) | (el==3));
+	r.bits.h = ((r.bits.h & (er==2)) | (er==3));
 
 	*resLeft =  l.c;
 	*resRight = r.c;

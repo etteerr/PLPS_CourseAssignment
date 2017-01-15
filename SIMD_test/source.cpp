@@ -75,6 +75,7 @@ int main(int nargs, char **args) {
 
 	uint64 mapx, mapy;
 	unsigned int steps;
+	steps = mapx = mapy = 0;
 
 	switch(nargs) {
 		case 1:
@@ -94,6 +95,7 @@ int main(int nargs, char **args) {
 				printf("Freebyte: %llu\n",info.freememByte);
 				printf("N-cores: %i\n",info.cores);
 			}
+			return 0;
 			break;
 	}
 
