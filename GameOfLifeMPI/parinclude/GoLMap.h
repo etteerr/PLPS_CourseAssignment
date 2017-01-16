@@ -7,12 +7,32 @@
 
 #ifndef GOLMAP_H_
 #define GOLMAP_H_
+
+//set verbose
+#ifndef VERBOSE
+	#define VERBOSE 1
+#endif
+
 //inc
 #include <stdio.h>
 #include <emmintrin.h> //SSE2
 //def
 typedef unsigned long long uint64;
 typedef unsigned char uchar;
+
+typedef union  {
+	uchar c;
+	struct s {
+		unsigned a:1;
+		unsigned b:1;
+		unsigned c:1;
+		unsigned d:1;
+		unsigned e:1;
+		unsigned f:1;
+		unsigned g:1;
+		unsigned h:1;
+	} bits;
+} charui;
 
 //GoLMap class
 class GoLMap{
@@ -28,6 +48,7 @@ class GoLMap{
 
 public:
 	//getters
+	bool isAllocated()			{ return sx>0;					};
 	uint64 getsx() 				{ return sx; 					};
 	uint64 getsy() 				{ return sy; 					};
 	int getOversize() 			{ return oversize; 				};
@@ -35,6 +56,52 @@ public:
 	uint64 getCacheCount64() 	{ return sxo/sizeof(uint64); 	};
 	uint64 getCacheCount128() 	{ return sxo/sizeof(__m128i); 	};
 	uint64 getCacheCount8() 	{ return sxo/sizeof(char); 		};
+	static uint64 getEstMemoryUsageBytes(uint64 sx, uint64 sy) {
+		uint64 oversize, sxo;
+		if (sx % 128LL!=0) {
+				oversize= 128 -(sx % 128);
+				sxo = sx + oversize;
+				sxo /= 8;
+			}else{
+				oversize = 0;
+				sxo = sx/8;
+			}
+		return sxo*sy;
+	}
+
+	void set(uint64 x, uint64 y, char state) {
+		if (x>=sx || y>=sy)
+			return;
+
+		charui * cache;
+		cache->c = *get8(sy, x/8);
+		switch(x%8) {
+			case 0:
+				cache->bits.a = state;
+				break;
+			case 1:
+				cache->bits.b = state;
+				break;
+			case 2:
+				cache->bits.c = state;
+				break;
+			case 3:
+				cache->bits.d = state;
+				break;
+			case 4:
+				cache->bits.e = state;
+				break;
+			case 5:
+				cache->bits.f = state;
+				break;
+			case 6:
+				cache->bits.g = state;
+				break;
+			case 7:
+				cache->bits.h = state;
+				break;
+		}
+	}
 
 	/*
 	 * Counts the alive cells using popcountll
@@ -113,15 +180,15 @@ public:
 		if (data==0)
 		{
 			//Error on allocating, rollback and set failing conditions
-			printf("Error while allocating memory.\nSize: %llu Bytes\nMap dimensions: %llux%llu\n", size/8, x,y);
+			if (VERBOSE) printf("Error while allocating memory.\nSize: %llu Bytes\nMap dimensions: %llux%llu\n", size/8, x,y);
 			sx = sy = 0;
 			oversize = 0;
 			return;
 		}
 
-		printf("\nAllocation successful.\nSize: %llu Bytes\nSize: %.5f MBytes\nMap dimensions: %llux%llu\n", size/8, (double)size/(1024.0*1024.0*8.0), x,y);
-		printf("True dimensions:%llux%llu\n", sxo*8, sy);
-		printf("Oversize: %i\n", oversize);
+		if (VERBOSE) printf("\nAllocation successful.\nSize: %llu Bytes\nSize: %.5f MBytes\nMap dimensions: %llux%llu\n", size/8, (double)size/(1024.0*1024.0*8.0), x,y);
+		if (VERBOSE) printf("True dimensions:%llux%llu\n", sxo*8, sy);
+		if (VERBOSE) printf("Oversize: %i\n", oversize);
 
 		//Set map to 0
 		for (uint64 row = 0; row < sy; row++)
@@ -164,7 +231,7 @@ public:
 	 * sets sx and sy to 0 and frees memory.
 	 */
 	~GoLMap() {
-		printf("Freeing GoL map (%llu Mb)\n", sxo*sy/(1024*1024));
+		if (VERBOSE) printf("Freeing GoL map (%llu Mb)\n", sxo*sy/(1024*1024));
 		free(data);
 		data = 0;
 	}

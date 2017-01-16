@@ -36,4 +36,22 @@ void printBinary64(uint64 &a) {
 		else
 			printf("0");
 }
+
+
+uint64 createWorldSegment() {
+	uint64 seg = 0;
+	float j;
+	for(int i = 0; i < 64; i++) {
+		j = (float)rand()/(float)(RAND_MAX);
+		if (j>=0.5)
+			seg+=0b1;
+		seg <<= 1;
+	}
+	return seg;
+}
+
+void createWorldSegment(uint64 * buffer, uint64 size) {
+	for (int i = 0; i < size; i++)
+		buffer[i] = createWorldSegment();
+}
 #endif
