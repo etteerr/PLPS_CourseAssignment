@@ -9,8 +9,8 @@
 #define GOLMAP_H_
 
 //set verbose
-#ifndef VERBOSE
-	#define VERBOSE 1
+#ifndef GOLVERBOSE
+	#define GOLVERBOSE 1
 #endif
 
 //inc
@@ -180,15 +180,15 @@ public:
 		if (data==0)
 		{
 			//Error on allocating, rollback and set failing conditions
-			if (VERBOSE) printf("Error while allocating memory.\nSize: %llu Bytes\nMap dimensions: %llux%llu\n", size/8, x,y);
+			if (GOLVERBOSE) printf("Error while allocating memory.\nSize: %llu Bytes\nMap dimensions: %llux%llu\n", size/8, x,y);
 			sx = sy = 0;
 			oversize = 0;
 			return;
 		}
 
-		if (VERBOSE) printf("\nAllocation successful.\nSize: %llu Bytes\nSize: %.5f MBytes\nMap dimensions: %llux%llu\n", size/8, (double)size/(1024.0*1024.0*8.0), x,y);
-		if (VERBOSE) printf("True dimensions:%llux%llu\n", sxo*8, sy);
-		if (VERBOSE) printf("Oversize: %i\n", oversize);
+		if (GOLVERBOSE) printf("\nAllocation successful.\nSize: %llu Bytes\nSize: %.5f MBytes\nMap dimensions: %llux%llu\n", size/8, (double)size/(1024.0*1024.0*8.0), x,y);
+		if (GOLVERBOSE) printf("True dimensions:%llux%llu\n", sxo*8, sy);
+		if (GOLVERBOSE) printf("Oversize: %i\n", oversize);
 
 		//Set map to 0
 		for (uint64 row = 0; row < sy; row++)
@@ -231,7 +231,7 @@ public:
 	 * sets sx and sy to 0 and frees memory.
 	 */
 	~GoLMap() {
-		if (VERBOSE) printf("Freeing GoL map (%llu Mb)\n", sxo*sy/(1024*1024));
+		if (GOLVERBOSE) printf("Freeing GoL map (%llu Mb)\n", sxo*sy/(1024*1024));
 		free(data);
 		data = 0;
 	}
