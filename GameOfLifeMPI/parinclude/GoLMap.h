@@ -32,7 +32,15 @@ typedef union  {
 		unsigned g:1;
 		unsigned h:1;
 	} bits;
-} charui;
+} charuni;
+
+struct systeminfo {
+	float avgload1; //avg load last minute
+	float avgload5; //avg load last 5 minutes
+	uint64 freememInMB;
+	uint64 freememByte;
+	int8_t cores; //ncores
+};
 
 //GoLMap class
 class GoLMap{
@@ -73,7 +81,7 @@ public:
 		if (x>=sx || y>=sy)
 			return;
 
-		charui * cache;
+		charuni * cache;
 		cache->c = *get8(sy, x/8);
 		switch(x%8) {
 			case 0:
@@ -158,6 +166,14 @@ public:
 	 */
 	GoLMap(uint64 x, uint64 y) {
 		sx = x; sy = y;
+		data = 0;
+
+		if (sx < 3 || sy < 3) {
+			if (GOLVERBOSE) printf("Map dimentions smaller than 3! (%llu by %llu)\n", sx,sy);
+			sx = sy = 0;
+			return;
+		}
+
 		// Every cell is 1 bit
 		// size (of x) must be multiple of 64 bits
 		if (sx % 128LL!=0) {
@@ -231,8 +247,8 @@ public:
 	 * sets sx and sy to 0 and frees memory.
 	 */
 	~GoLMap() {
-		if (GOLVERBOSE) printf("Freeing GoL map (%llu Mb)\n", sxo*sy/(1024*1024));
-		free(data);
+		if (GOLVERBOSE && data) printf("Freeing GoL map (%.5f Mb)\n", (float)(sxo*sy)/(1024.0*1024.0));
+		if (data) free(data);
 		data = 0;
 	}
 

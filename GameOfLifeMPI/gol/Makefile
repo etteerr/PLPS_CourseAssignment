@@ -6,7 +6,7 @@ LIBS=-lgomp
 CPP = mpic++
 
 _DEP = GoLMap.h
-_OBJ = main.o stepfunctions.o
+_OBJ = main.o Gompi.o
 
 DEP = $(patsubst %, ../parinclude/%, $(_DEP))
 OBJ = $(patsubst %, ../parobjs/%, $(_OBJ))
