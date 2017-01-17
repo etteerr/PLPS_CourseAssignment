@@ -354,9 +354,9 @@ void Gompi::runMPI(int64 steps) {
 	GoLMap * tmp;
 
 	while(status==ESTATE_OK && stepCounter < steps) {
-		if (VERBOSE) printf("Node %i: Starting step %lli\n", world_rank, MPI_PROCESSING_FLAGS);
+		if (VERBOSE) printf("Node %i: Starting step %lli\n", world_rank, stepCounter);
 		//Step
-		stepGeneral(*readMap, *writeMap, flags);
+		stepGeneral(*readMap, *writeMap, MPI_PROCESSING_FLAGS);
 		//Swap buffers
 		tmp = readMap;
 		readMap = writeMap;
