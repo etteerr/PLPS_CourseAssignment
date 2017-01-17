@@ -16,12 +16,12 @@
 
 //Entry (Assumption is that all programs receive the same arguments)
 int main(int nargs, char **args) {
-	uint64 steps, mapx, mapy;
+	int64 steps, mapx, mapy;
 	steps = mapx = mapy = 0;
 
 	switch(nargs) {
 		case 1:
-			mapx = mapy = 2560;
+			mapx = mapy = 8;
 			steps = 10000;
 			break;
 		case 4:
@@ -44,7 +44,15 @@ int main(int nargs, char **args) {
 	// RUn program
 	Gompi gameoflife(mapx, mapy);
 
+	sleep(2);
+
+	//print intial alive
+	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
+	else gameoflife.getAlive();
+
+
 	if (!gameoflife.getStatus()) {
+		//printf("Node %i: Starting GoL\n",gameoflife.getWorldRank());
 		//Start chrono
 
 		//run
@@ -54,6 +62,9 @@ int main(int nargs, char **args) {
 
 	}
 
+	//printf("Node %i: Exited.\n", gameoflife.getWorldRank());
+	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
+	else gameoflife.getAlive();
 
 	return gameoflife.getStatus();
 }

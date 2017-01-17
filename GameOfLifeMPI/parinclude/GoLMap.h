@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <emmintrin.h> //SSE2
 //def
-typedef unsigned long long uint64;
+typedef long long int int64;
 typedef unsigned char uchar;
 
 typedef union  {
@@ -37,8 +37,8 @@ typedef union  {
 struct systeminfo {
 	float avgload1; //avg load last minute
 	float avgload5; //avg load last 5 minutes
-	uint64 freememInMB;
-	uint64 freememByte;
+	int64 freememInMB;
+	int64 freememByte;
 	int8_t cores; //ncores
 };
 
@@ -46,26 +46,26 @@ struct systeminfo {
 class GoLMap{
 
 	//map size (in bits)
-	uint64 sx, sy;
+	int64 sx, sy;
 	//oversize of x (in bits)
 	int oversize;
-	uint64 sxo; //True size of x in bytes
+	int64 sxo; //True size of x in bytes
 
 	//map holder
 	void *data;
 
 public:
 	//getters
-	bool isAllocated()			{ return sx>0;					};
-	uint64 getsx() 				{ return sx; 					};
-	uint64 getsy() 				{ return sy; 					};
+	bool isAllocated()			{ return sx>0 && data;			};
+	int64 getsx() 				{ return sx; 					};
+	int64 getsy() 				{ return sy; 					};
 	int getOversize() 			{ return oversize; 				};
-	uint64 getMapSizeInBytes() 	{ return sxo*sy; 				};
-	uint64 getCacheCount64() 	{ return sxo/sizeof(uint64); 	};
-	uint64 getCacheCount128() 	{ return sxo/sizeof(__m128i); 	};
-	uint64 getCacheCount8() 	{ return sxo/sizeof(char); 		};
-	static uint64 getEstMemoryUsageBytes(uint64 sx, uint64 sy) {
-		uint64 oversize, sxo;
+	int64 getMapSizeInBytes() 	{ return sxo*sy; 				};
+	int64 getCacheCount64() 	{ return sxo/sizeof(int64); 	};
+	int64 getCacheCount128() 	{ return sxo/sizeof(__m128i); 	};
+	int64 getCacheCount8() 	{ return sxo/sizeof(char); 		};
+	static int64 getEstMemoryUsageBytes(int64 sx, int64 sy) {
+		int64 oversize, sxo;
 		if (sx % 128LL!=0) {
 				oversize= 128 -(sx % 128);
 				sxo = sx + oversize;
@@ -77,7 +77,7 @@ public:
 		return sxo*sy;
 	}
 
-	void set(uint64 x, uint64 y, char state) {
+	void set(int64 x, int64 y, char state) {
 		if (x>=sx || y>=sy)
 			return;
 
@@ -114,13 +114,17 @@ public:
 	/*
 	 * Counts the alive cells using popcountll
 	 */
-	uint64 getAlive(){
-		uint64 count = 0;
+	int64 getAlive(){
+		int64 count = 0;
+		int64 tmp = 0;
 
-		for(uint64 row = 0; row<this->getsy(); row++){
-			for(uint64 cache = 0; cache < this->getCacheCount128(); cache++) {
-				count += __builtin_popcountll(*this->get64(row, cache));
+		for(int64 row = 0; row<this->getsy(); row++){
+			for(int64 cache = 0; cache < this->getCacheCount128(); cache++) {
+				tmp += __builtin_popcountll(*this->get64(row, cache));
 			}
+			//printf("Row %i: Count: %i\n", row, tmp);
+			count += tmp;
+			tmp = 0;
 		}
 
 		return count;
@@ -128,18 +132,26 @@ public:
 
 	/*
 	 * Request 64 bits cache located at cacheposition (sx multiple of 64)
+	 * Warps row input to valid value
 	 */
-	uint64 * get64(uint64 row, uint64 cacheposition) {
+	int64 * get64(int64 row, int64 cacheposition) {
 		//printf("Cache access64: %llu, %llu\n", row, cacheposition);
-		return ((uint64*)data) + cacheposition + (row*sxo)/sizeof(uint64);
+		//if (GOLVERBOSE) if (row < 0 || row >= sy) printf("Row128: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
+		//if (GOLVERBOSE) if ((cacheposition < 0) || (cacheposition >= sxo/sizeof(int64))) printf("cache64: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
+		row = (row%sy+sy)%sy;
+		return ((int64*)data) + cacheposition + (row*sxo)/sizeof(int64);
 	}
 
 	/*
 	 * Requests the __m128i wide pointer located at cacheposition
 	 * (sx multiple of 128) for use in SSE
+	 * Warps row input to valid value
 	 */
-	__m128i * get128(uint64 row, uint64 cacheposition) {
+	__m128i * get128(int64 row, int64 cacheposition) {
 		//printf("Cache access128: %llu, %llu\n", row, cacheposition);
+		//if (GOLVERBOSE) if (row < 0 || row >= sy) printf("Row128: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
+		//if (GOLVERBOSE) if (cacheposition < 0 || cacheposition >= sxo/sizeof(__m128i)) printf("cache128: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
+		row = (row%sy+sy)%sy;
 		return ((__m128i*)data) + cacheposition + (row*sxo)/sizeof(__m128i);
 	}
 
@@ -149,12 +161,16 @@ public:
 	 * Size is a byte
 	 * cacheposition is bytewise as well
 	 * ALERT: This will screw up with the wrong endian!
+	 * Warps row input to valid value
 	 */
-	uchar * get8(uint64 row, uint64 cacheposition) {
+	uchar * get8(int64 row, int64 cacheposition) {
 		//printf("Cache access8: %llu, %llu\n", row, cacheposition);
+		//if (GOLVERBOSE) if (row < 0 || row >= sy) printf("Row128: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
+		//if (GOLVERBOSE) if (cacheposition < 0 || cacheposition >= sxo/sizeof(char)) printf("cache8: %lli -> %lli (of %lli)\n", row, (row%sy+sy)%sy, sy);
 		//Little endian:
 		//return ((char*)data) + cacheposition + (row*sxo)/sizeof(char);
 		//Big endian:
+		row = (row%sy+sy)%sy;
 		uchar * buff;
 		buff = (uchar*)get64(row, cacheposition/8);
 		return &buff[7-(cacheposition%8)];
@@ -164,7 +180,7 @@ public:
 	 * Initialize map to x by y raw memory with zeros
 	 * On error, allocation is freed and sx & sy will be zero
 	 */
-	GoLMap(uint64 x, uint64 y) {
+	GoLMap(int64 x, int64 y) {
 		sx = x; sy = y;
 		data = 0;
 
@@ -186,7 +202,7 @@ public:
 		}
 
 		// field size is x*y (in bits)
-		uint64 size = (sx+oversize)*y;
+		int64 size = (sx+oversize)*y;
 
 		//Allocate data
 		// 128 bits (16 byte) allignment
@@ -204,12 +220,12 @@ public:
 
 		if (GOLVERBOSE) printf("\nAllocation successful.\nSize: %llu Bytes\nSize: %.5f MBytes\nMap dimensions: %llux%llu\n", size/8, (double)size/(1024.0*1024.0*8.0), x,y);
 		if (GOLVERBOSE) printf("True dimensions:%llux%llu\n", sxo*8, sy);
-		if (GOLVERBOSE) printf("Oversize: %i\n", oversize);
+		if (GOLVERBOSE) printf("Oversize: %i\n\n", oversize);
 
 		//Set map to 0
-		for (uint64 row = 0; row < sy; row++)
-			for (uint64 cpos = 0; cpos < (sxo/sizeof(uint64)); cpos++) {
-				*(((uint64*)data) + row*(sxo/sizeof(uint64)) + cpos ) = 0LL;
+		for (int64 row = 0; row < sy; row++)
+			for (int64 cpos = 0; cpos < (sxo/(int64)sizeof(int64)); cpos++) {
+				*(((int64*)data) + row*(sxo/sizeof(int64)) + cpos ) = 0;
 			}
 	}//map
 
@@ -220,11 +236,21 @@ public:
 		if (!oversize)
 			return;
 
+
 		//fill mask with ones for oversized position and bitwise not
-		uint64 mask = ~((1<<oversize)-1);
-		//#pragma omp parallel for default(none) shared(mask)
-		for (uint64 row = 0; row < sy; row++)
-			*( ( (uint64*) data) + row*(sxo/sizeof(uint64)) + (sxo/sizeof(uint64))-1 ) &= mask;
+		if (oversize>64){
+			unsigned long long mask = ~((1ll<<((unsigned long long)oversize-64ll))-1ll);
+			//#pragma omp parallel for default(none) shared(mask)
+			for (int64 row = 0; row < sy; row++) {
+				*( ( (int64*) data) + row*(sxo/sizeof(int64)) + (sxo/sizeof(int64))-1 ) = 0;
+				*( ( (int64*) data) + row*(sxo/sizeof(int64)) + (sxo/sizeof(int64))-2 ) &= mask;
+			}
+		}else{
+			unsigned long long mask = ~((1ll<<((unsigned long long)oversize))-1ll);
+			//the rest of the 128 bits
+			for (int64 row = 0; row < sy; row++)
+				*( ( (int64*) data) + row*(sxo/sizeof(int64)) + (sxo/sizeof(int64))-1 ) &= mask;
+		}
 
 	}
 
@@ -234,7 +260,7 @@ public:
 	 * Then a check is done to see if all rows of data are of size y.
 	 * If not, sx and sy are set to 0 and map has failed to initialize.
 	 */
-	GoLMap(uint64 x, uint64 y, int _oversize, void * _data) {
+	GoLMap(int64 x, int64 y, int _oversize, void * _data) {
 		//Assumption that data is of size x*y
 		data = _data;
 		oversize = _oversize;
