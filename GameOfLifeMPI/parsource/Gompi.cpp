@@ -305,13 +305,12 @@ void Gompi::waitForMessage(int source, int tag, MPI_Comm comm) {
 }
 
 void Gompi::runSolo(int64 steps) {
-	char flags = 0;//FLAG_STEP_PARALLELPROCESSING;
 	int64 stepCounter = 0;
 	GoLMap * tmp;
 
 	while(status==ESTATE_OK && stepCounter < steps) {
 		//Step
-		stepGeneral(*readMap, *writeMap, flags);
+		stepGeneral(*readMap, *writeMap, SOLO_PROCESSING_FLAGS);
 		//Swap buffers
 		tmp = readMap;
 		readMap = writeMap;
@@ -351,12 +350,11 @@ void Gompi::cascadeError() {
 }
 
 void Gompi::runMPI(int64 steps) {
-	char flags = FLAG_STEP_GHOSTROWS | FLAG_STEP_POLLGHOSTROWS_MPI;// | FLAG_STEP_PARALLELPROCESSING;
 	int64 stepCounter = 0;
 	GoLMap * tmp;
 
 	while(status==ESTATE_OK && stepCounter < steps) {
-		if (VERBOSE) printf("Node %i: Starting step %lli\n", world_rank, stepCounter);
+		if (VERBOSE) printf("Node %i: Starting step %lli\n", world_rank, MPI_PROCESSING_FLAGS);
 		//Step
 		stepGeneral(*readMap, *writeMap, flags);
 		//Swap buffers

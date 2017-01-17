@@ -8,19 +8,11 @@
 #ifndef PARINCLUDE_GOMPI_H_
 #define PARINCLUDE_GOMPI_H_
 
-//Settings
-#define VERBOSE 0
-#define GOLVERBOSE 0
-#define OMPI_SKIP_MPICXX //C++ bindings not working with autocomplete... Lazy C functions work well
-#define STEP_MP_THRESHOLD_XY 100 //Both X and Y must be bigger than, before MP can starts
-#define GOMPI_SEED 1 //Seed for map generation
-
-
-//inc
-#include <sys/sysinfo.h>
-#include <unistd.h> //sysconf
-#include <openmpi/mpi.h>
-#include "../parinclude/GoLMap.h" //uint64/uchar
+//flags for stepGeneral
+#define FLAG_STEP_NOFLAG 				0b00000000
+#define FLAG_STEP_GHOSTROWS 			0b00000001
+#define FLAG_STEP_POLLGHOSTROWS_MPI 	0b00000010
+#define FLAG_STEP_PARALLELPROCESSING 	0b00000100
 
 //States
 volatile const int ESTATE_OK 				= 0;
@@ -29,6 +21,27 @@ volatile const int ESTATE_ALLOCATIONERROR 	= 2;
 volatile const int ESTATE_PROCESSINGERROR 	= 3;
 volatile const int ESTATE_DATARECVERROR 	= 4;
 volatile const int ESTATE_UNDEFINEDERROR 	= 666;
+
+//External settings
+#define OMPI_SKIP_MPICXX //C++ bindings not working with autocomplete... Lazy C functions work well (As they are extern 'c' declared)
+
+//Settings
+#define VERBOSE 			 0
+#define GOLVERBOSE 			 0
+#define STEP_MP_THRESHOLD_XY 100 	//Both X and Y must be bigger than, before MP can starts
+#define GOMPI_SEED 			 1 		//Seed for map generation
+
+//processing flags
+#define SOLO_PROCESSING_FLAGS 	FLAG_STEP_NOFLAG
+#define MPI_PROCESSING_FLAGS	FLAG_STEP_GHOSTROWS | FLAG_STEP_POLLGHOSTROWS_MPI
+
+
+//inc
+#include <sys/sysinfo.h>
+#include <unistd.h> //sysconf
+#include <openmpi/mpi.h>
+#include "../parinclude/GoLMap.h" //uint64/uchar
+
 
 
 /* COMM labels
@@ -164,10 +177,7 @@ private:
 	void step128(__m128i * _rowchunk, __m128i *_rowabove, __m128i * _rowbelow, __m128i * _rowresult);
 
 
-	//flags for stepGeneral
-#define FLAG_STEP_GHOSTROWS 0b00000001
-#define FLAG_STEP_POLLGHOSTROWS_MPI 0b00000010
-#define FLAG_STEP_PARALLELPROCESSING 0b00000100
+
 	/****
 	 * stepGeneral
 	 * Steps the whole map. Different ways based on the flags
