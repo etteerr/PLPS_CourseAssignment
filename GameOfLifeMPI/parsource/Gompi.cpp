@@ -931,6 +931,10 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 	//Vertical border should already be interpreted as 0
 	//reset the invalid datapoints
 	newmap.resetFalseBorder();
+
+	//Clean the requests (causes INSANE memory leak if not done)
+	EMPI_Wait(&sendStatus1, MPI_STATUS_IGNORE);
+	EMPI_Wait(&sendStatus2, MPI_STATUS_IGNORE);
 }
 
 void Gompi::createWorldSegment(int64 & seg) {
