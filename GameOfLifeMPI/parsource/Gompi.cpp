@@ -933,8 +933,10 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 	newmap.resetFalseBorder();
 
 	//Clean the requests (causes INSANE memory leak if not done)
-	EMPI_Wait(&sendStatus1, MPI_STATUS_IGNORE);
-	EMPI_Wait(&sendStatus2, MPI_STATUS_IGNORE);
+	if (flags & FLAG_STEP_POLLGHOSTROWS_MPI) {
+		EMPI_Wait(&sendStatus1, MPI_STATUS_IGNORE);
+		EMPI_Wait(&sendStatus2, MPI_STATUS_IGNORE);
+	}
 }
 
 void Gompi::createWorldSegment(int64 & seg) {

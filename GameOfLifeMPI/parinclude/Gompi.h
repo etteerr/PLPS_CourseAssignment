@@ -9,7 +9,7 @@
 #define PARINCLUDE_GOMPI_H_
 
 //Profiling
-//#define EProfiling
+#define EProfiling
 
 //flags for stepGeneral
 #define FLAG_STEP_NOFLAG 				0b00000000
