@@ -8,6 +8,9 @@
 #ifndef PARINCLUDE_GOMPI_H_
 #define PARINCLUDE_GOMPI_H_
 
+//Profiling
+//#define EProfiling
+
 //flags for stepGeneral
 #define FLAG_STEP_NOFLAG 				0b00000000
 #define FLAG_STEP_GHOSTROWS 			0b00000001
@@ -43,6 +46,46 @@ volatile const int ESTATE_UNDEFINEDERROR 	= 666;
 #include "../parinclude/GoLMap.h" //uint64/uchar
 
 
+//Profiling functions
+#ifndef PROFILINGTOOLSER
+#define PROFILINGTOOLSER
+
+extern unsigned long long sendCount;
+extern unsigned long long recvCount;
+extern unsigned long long isendCount;
+extern unsigned long long irecvCount;
+extern unsigned long long bcastCount;
+extern unsigned long long waitCount;
+
+extern double sendDuration;
+extern double recvDuration;
+extern double isendDuration;
+extern double irecvDuration;
+extern double bcastDuration;
+extern double waitDuration;
+
+extern double ttime;
+
+extern int __EMPI_WAIT(MPI_Request * req, MPI_Status *stat);
+extern void printProfiling();
+
+#ifdef EProfiling
+	#define EMPI_Send(BUF, COUNT, DATATYPE, DEST, TAG, COMM) 			sendCount++; 	ttime=MPI_Wtime(); MPI_Send(BUF, COUNT, DATATYPE, DEST, TAG, COMM); 		sendDuration +=MPI_Wtime()-ttime
+	#define EMPI_Recv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, STAT) 	recvCount++; 	ttime=MPI_Wtime(); MPI_Recv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, STAT); recvDuration +=MPI_Wtime()-ttime
+	#define EMPI_Isend(BUF, COUNT, DATATYPE, DEST, TAG, COMM, REQ) 		isendCount++; 	ttime=MPI_Wtime(); MPI_Isend(BUF, COUNT, DATATYPE, DEST, TAG, COMM, REQ); 	isendDuration+=MPI_Wtime()-ttime
+	#define EMPI_Irecv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, REQ) 	irecvCount++; 	ttime=MPI_Wtime(); MPI_Irecv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, REQ); irecvDuration+=MPI_Wtime()-ttime
+	#define EMPI_Bcast(BUF, COUNT, DATATYPE, SOURCE, COMM) 				bcastCount++; 	ttime=MPI_Wtime(); MPI_Bcast(BUF, COUNT, DATATYPE, SOURCE, COMM); 			bcastDuration+=MPI_Wtime()-ttime
+	#define EMPI_Wait(REQ, STAT)										__EMPI_WAIT(REQ, STAT)
+#else
+	#define EMPI_Send(BUF, COUNT, DATATYPE, DEST, TAG, COMM) 			MPI_Send(BUF, COUNT, DATATYPE, DEST, TAG, COMM)
+	#define EMPI_Recv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, STAT) 	MPI_Recv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, STAT)
+	#define EMPI_Isend(BUF, COUNT, DATATYPE, DEST, TAG, COMM, REQ) 		MPI_Isend(BUF, COUNT, DATATYPE, DEST, TAG, COMM, REQ)
+	#define EMPI_Irecv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, REQ) 	MPI_Irecv(BUF, COUNT, DATATYPE, SOURCE, TAG, COMM, REQ)
+	#define EMPI_Bcast(BUF, COUNT, DATATYPE, SOURCE, COMM) 				MPI_Bcast(BUF, COUNT, DATATYPE, SOURCE, COMM)
+	#define EMPI_Wait(REQ, STAT) 										MPI_Wait(REQ, STAT)
+#endif
+
+#endif
 
 /* COMM labels
  * 	STATE: label for exchanging states

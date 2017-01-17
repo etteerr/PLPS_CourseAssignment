@@ -1,5 +1,46 @@
 #include "../parinclude/Gompi.h"
 
+unsigned long long sendCount = 0;
+unsigned long long recvCount = 0;
+unsigned long long isendCount= 0;
+unsigned long long irecvCount= 0;
+unsigned long long bcastCount= 0;
+unsigned long long waitCount = 0;
+
+double sendDuration = 0;
+double recvDuration = 0;
+double isendDuration= 0;
+double irecvDuration= 0;
+double bcastDuration= 0;
+double waitDuration = 0;
+
+double ttime = 0;
+
+void printProfiling() {
+	printf("Profiling report:\n");
+	printf("\tsendCount: \t%llu\n", sendCount);
+	printf("\trecvCount: \t%llu\n", recvCount);
+	printf("\tisendCount:\t%llu\n", isendCount);
+	printf("\tirecvCount:\t%llu\n", irecvCount);
+	printf("\tbcastCount:\t%llu\n", bcastCount);
+	printf("\twaitCount: \t%llu\n", waitCount);
+	printf("Timings:\n");
+	printf("\tsendDuration: \t%.10f\n", sendDuration);
+	printf("\trecvDuration: \t%.10f\n", recvDuration);
+	printf("\tisendDuration:\t%.10f\n", isendDuration);
+	printf("\tirecvDuration:\t%.10f\n", irecvDuration);
+	printf("\tbcastDuration:\t%.10f\n", bcastDuration);
+	printf("\twaitDuration: \t%.10f\n", waitDuration);
+}
+
+int __EMPI_WAIT(MPI_Request * req, MPI_Status *stat) {
+	waitCount++;
+	ttime=MPI_Wtime();
+	int r = MPI_Wait(req, stat);
+	waitDuration +=MPI_Wtime()-ttime;
+	return r;
+}
+
 void printBinary64(int64 &a) {
 	for (int i = 0; i < 64; i++)
 		if ((a<<i)&0b1000000000000000000000000000000000000000000000000000000000000000)
@@ -364,7 +405,7 @@ void Gompi::runMPI(int64 steps) {
 		//Inc step
 		stepCounter++;
 		//sync
-		MPI_Bcast(&stepCounter, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
+		EMPI_Bcast(&stepCounter, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
 	}
 
 	//Cascade error
@@ -655,11 +696,11 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 			if (VERBOSE) printf("Node %i: sending to ranks (%i) & (%i)\n", world_rank, ((world_rank-1)%world_size+world_size)%world_size, ((world_rank+1)%world_size+world_size)%world_size);
 
 			//Share data with node 'above' and 'below'
-			MPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &sendStatus1);
-			MPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &sendStatus2);
+			EMPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &sendStatus1);
+			EMPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &sendStatus2);
 			//Recv shared data (parallel ofc)
-			MPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &requestStatus1);
-			MPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &requestStatus2);
+			EMPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &requestStatus1);
+			EMPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &requestStatus2);
 
 			//if (VERBOSE) printf("Node %i: Data received.\n", world_rank);
 		}
@@ -739,7 +780,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 			{
 				__m128i *above, *below, *current, *target;
 				MPI_Status stat;
-				if (!MPI_Wait(&requestStatus1, &stat))
+				if (!EMPI_Wait(&requestStatus1, &stat))
 					stat.MPI_ERROR = 0;
 
 				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA_DOWN || stat.MPI_SOURCE != ((world_rank-1)%world_size+world_size)%world_size) {
@@ -771,7 +812,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 			{
 				__m128i *above, *below, *current, *target;
 				MPI_Status stat;
-				if (!MPI_Wait(&requestStatus2, &stat))
+				if (!EMPI_Wait(&requestStatus2, &stat))
 					stat.MPI_ERROR = 0;
 
 				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA_UP || stat.MPI_SOURCE != ((world_rank+1)%world_size+world_size)%world_size) {

@@ -52,8 +52,8 @@ int main(int nargs, char **args) {
 
 
 	//print intial alive
-	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
-	else gameoflife.getAlive();
+	//if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
+	//else gameoflife.getAlive();
 
 	//Init timer
 	timeval start, end;
@@ -79,12 +79,17 @@ int main(int nargs, char **args) {
 	duration = (end.tv_sec + (end.tv_usec / 1000000.0)) -
 			(start.tv_sec + (start.tv_usec / 1000000.0));
 
+
+	//Print alive cells
+	if (gameoflife.getWorldRank()==0) printf("Number of live cells = %d\n", gameoflife.getAlive());
+	else gameoflife.getAlive();
+
 	//Print duration
 	if (gameoflife.getWorldRank()==0) printf("Computing time: %.5f\n", duration);
 
 	//printf("Node %i: Exited.\n", gameoflife.getWorldRank());
-	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
-	else gameoflife.getAlive();
+
+	if (gameoflife.getWorldRank()==0) printProfiling();
 
 	return gameoflife.getStatus();
 }
