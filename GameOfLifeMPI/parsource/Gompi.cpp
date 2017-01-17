@@ -305,7 +305,7 @@ void Gompi::waitForMessage(int source, int tag, MPI_Comm comm) {
 }
 
 void Gompi::runSolo(int64 steps) {
-	char flags = FLAG_STEP_PARALLELPROCESSING;
+	char flags = 0;//FLAG_STEP_PARALLELPROCESSING;
 	int64 stepCounter = 0;
 	GoLMap * tmp;
 
@@ -657,11 +657,11 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 			if (VERBOSE) printf("Node %i: sending to ranks (%i) & (%i)\n", world_rank, ((world_rank-1)%world_size+world_size)%world_size, ((world_rank+1)%world_size+world_size)%world_size);
 
 			//Share data with node 'above' and 'below'
-			MPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA, MPI_COMM_WORLD, &sendStatus1);
-			MPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA, MPI_COMM_WORLD, &sendStatus2);
+			MPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &sendStatus1);
+			MPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &sendStatus2);
 			//Recv shared data (parallel ofc)
-			MPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, MPI_ANY_TAG, MPI_COMM_WORLD, &requestStatus1);
-			MPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, MPI_ANY_TAG, MPI_COMM_WORLD, &requestStatus2);
+			MPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &requestStatus1);
+			MPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &requestStatus2);
 
 			//if (VERBOSE) printf("Node %i: Data received.\n", world_rank);
 		}
@@ -744,7 +744,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 				if (!MPI_Wait(&requestStatus1, &stat))
 					stat.MPI_ERROR = 0;
 
-				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA || stat.MPI_SOURCE != ((world_rank-1)%world_size+world_size)%world_size) {
+				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA_DOWN || stat.MPI_SOURCE != ((world_rank-1)%world_size+world_size)%world_size) {
 					#pragma omp critical
 					sharedStat = ESTATE_PROCESSINGERROR;
 					printf("Node %i: Invalid message received:\n\tMPI_ERROR: %i\n\tMPI_TAG: %i\n\tMPI_SOURCE: %i\n\tExpected source: %i\n",
@@ -776,7 +776,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 				if (!MPI_Wait(&requestStatus2, &stat))
 					stat.MPI_ERROR = 0;
 
-				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA || stat.MPI_SOURCE != ((world_rank+1)%world_size+world_size)%world_size) {
+				if (stat.MPI_ERROR || stat.MPI_TAG != ECOMM_DATA_UP || stat.MPI_SOURCE != ((world_rank+1)%world_size+world_size)%world_size) {
 					#pragma omp critical
 					sharedStat = ESTATE_PROCESSINGERROR;
 					printf("Node %i: Invalid message received:\n\tMPI_ERROR: %i\n\tMPI_TAG: %i\n\tMPI_SOURCE: %i\n\tExpected source: %i\n",

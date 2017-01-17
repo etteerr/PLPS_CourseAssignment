@@ -30,11 +30,18 @@ volatile const int ESTATE_PROCESSINGERROR 	= 3;
 volatile const int ESTATE_DATARECVERROR 	= 4;
 volatile const int ESTATE_UNDEFINEDERROR 	= 666;
 
-//COMM labels
+
+/* COMM labels
+ * 	STATE: label for exchanging states
+ * 	DATA: label for exchanging generic data
+ * 	DATA_UP/DOWN: Specific direction data (COMM direction in world_rank from perspective of send)
+ */
 enum {
-	ECOMM_DATA,
 	ECOMM_STATE,
-	ECOMM_OTHER
+	ECOMM_OTHER,
+	ECOMM_DATA=100,
+	ECOMM_DATA_UP,
+	ECOMM_DATA_DOWN
 };
 
 //Handy define
@@ -181,6 +188,10 @@ private:
 	 */
 	void getsysinfo(systeminfo *nfo);
 public:
+
+	void ABORT(int code) {
+		MPI_Abort(MPI_COMM_WORLD, code);
+	}
 	/*
 	 * TODO Gompi constructor
 	 */

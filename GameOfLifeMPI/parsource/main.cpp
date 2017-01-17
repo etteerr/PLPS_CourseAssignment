@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <chrono>
 #include "../parinclude/Gompi.h"
-
+#include <sys/time.h>
 
 
 
@@ -39,28 +39,48 @@ int main(int nargs, char **args) {
 
 	if (mapx < 3 || mapy < 3){
 		printf("Map must be bigger than 2x2\n");
+		return 1;
+	}
+
+	if (steps < 1 ) {
+		printf("Steps must be > 0");
+		return 1;
 	}
 
 	// RUn program
 	Gompi gameoflife(mapx, mapy);
 
-	sleep(2);
 
 	//print intial alive
 	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
 	else gameoflife.getAlive();
 
+	//Init timer
+	timeval start, end;
+	double duration;
+
+	//Wait 2 seconds
+	sleep(2);
 
 	if (!gameoflife.getStatus()) {
 		//printf("Node %i: Starting GoL\n",gameoflife.getWorldRank());
 		//Start chrono
+		if (gettimeofday(&start, 0))
+			gameoflife.ABORT(667);
 
 		//run
 		gameoflife.run(steps);
 
 		//end chrono
-
+		if (gettimeofday(&end, 0))
+			gameoflife.ABORT(667);
 	}
+
+	duration = (end.tv_sec + (end.tv_usec / 1000000.0)) -
+			(start.tv_sec + (start.tv_usec / 1000000.0));
+
+	//Print duration
+	if (gameoflife.getWorldRank()==0) printf("Computing time: %.5f\n", duration);
 
 	//printf("Node %i: Exited.\n", gameoflife.getWorldRank());
 	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
