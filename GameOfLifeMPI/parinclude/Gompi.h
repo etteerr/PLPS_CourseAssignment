@@ -126,7 +126,7 @@ private:
 
 	//Global game data
 	uint64 mapx, mapy;
-	GoLMap *readMap = 0, *writeMap = 0;
+	GoLMap *readMap, *writeMap;
 	uint64 caches; //Amount of 64 bits per row
 
 	//Node info
