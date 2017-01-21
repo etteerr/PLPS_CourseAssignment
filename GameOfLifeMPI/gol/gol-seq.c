@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  printf("Number of live cells = %d\n", isum);
+  //printf("Number of live cells = %d\n", isum);
 
 	if(gettimeofday(&start, 0) != 0) {
 		fprintf(stderr, "could not do timing\n");

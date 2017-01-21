@@ -139,13 +139,15 @@ int Gompi::generateAndDistribute() {
 	uint64 rowCount = mapy/(uint64)world_size;
 	uint64 * rowCounts = new uint64[world_size];
 	uint64 rest = mapy%(uint64)world_size;
-	for (uint64 i = 0; i < world_size; i++) {
+	for (int64 i = 0; i < world_size; i++) {
 		rowCounts[i] = rowCount;
 		if (rest > 0) {
 			rowCounts[i]++;
 			rest--;
 		}
+
 	}
+	printf("Node %i: %llu rows\n", world_rank, rowCounts[world_rank]);
 
 	//Start distribution
 	{
@@ -173,24 +175,24 @@ int Gompi::generateAndDistribute() {
 		}
 		delete sbuffer;
 
+
+		//Create own data
+		//THis should be after sending.... But the seq implementation Implies using random, and we thus need this first
+		readMap = new GoLMap(mapx, rowCounts[0]+2);
+		writeMap = new GoLMap(mapx, rowCounts[0]+2);
+
+		if (VERBOSE) printf("Master: Creating own segment...\n");
+		if (readMap->isAllocated() && writeMap->isAllocated()) {
+			//Get a pointer to data of row 2 (row 1 is the row from warp, last row is the row from rank 1 machine)
+			buffer = readMap->get64(1,0);
+			//Fill this memory
+			createWorldSegment(buffer, (rowCounts[0])*caches);
+		}else
+			status = ESTATE_ALLOCATIONERROR;
+
+
 		//create and send 'their'  data
 		for (int i = 1; i < world_size; i++) {
-
-			//Create own data
-			//THis should be after sending.... But the seq implementation Implies using random, and we thus need this first
-			readMap = new GoLMap(mapx, rowCounts[0]+2);
-			writeMap = new GoLMap(mapx, rowCounts[0]+2);
-
-			if (VERBOSE) printf("Master: Creating own segment...\n");
-			if (readMap->isAllocated() && writeMap->isAllocated()) {
-				//Get a pointer to data of row 2 (row 1 is the row from warp, last row is the row from rank 1 machine)
-				buffer = readMap->get64(1,0);
-				//Fill this memory
-				createWorldSegment(buffer, (rowCounts[0])*caches);
-			}else
-				status = ESTATE_ALLOCATIONERROR;
-
-
 			//Send ok to recv
 			MPI_Send(&status, 1, MPI_INT,i, ECOMM_STATE, MPI_COMM_WORLD);
 			if (status==ESTATE_OK){
