@@ -15,7 +15,6 @@
 
 //inc
 #include <stdio.h> //alligned_alloc
-#include <cstdlib> //ALligned_alloc fix
 #include <emmintrin.h> //SSE2
 //def
 typedef unsigned long long int uint64;
@@ -264,9 +263,10 @@ public:
 		//Allocate data
 		// 128 bits (16 byte) allignment
 		// of size/8 bytes
-		data = aligned_alloc(128/8, size/8);
+		//data = aligned_alloc(128/8, size/8);
+		int res = posix_memalign(&data,128/8, size/8); //das4 does not use c++11 compatible version of gcc
 
-		if (data==0)
+		if (data==0 || res)
 		{
 			//Error on allocating, rollback and set failing conditions
 			if (GOLVERBOSE) printf("Error while allocating memory.\nSize: %llu Bytes\nMap dimensions: %llux%llu\n", size/8, x,y);
