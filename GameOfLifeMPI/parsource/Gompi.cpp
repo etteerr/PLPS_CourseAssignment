@@ -330,7 +330,9 @@ int Gompi::checkMemory() {
 	}
 
 	//receive statuses (or send if master)
-	MPI_Bcast(&status, 1, MPI_CXX_BOOL, COMM_MASTER, MPI_COMM_WORLD);
+	//MPI_CXX_BOOL is not supported on DAS4
+	//Char is the same size
+	MPI_Bcast(&status, 1, MPI_CHAR, COMM_MASTER, MPI_COMM_WORLD);
 
 	return status;
 }
@@ -371,7 +373,7 @@ void Gompi::cascadeError() {
 		uint64 s = world_rank;
 		//Let all nodes be errored >:)
 		if (world_rank!=0) //Slave
-			MPI_Send(&s, 1, MPI_UINT64_T, 0, ECOMM_STATE, MPI_COMM_WORLD);
+			MPI_Send(&s, 1, MPI_LONG_LONG, 0, ECOMM_STATE, MPI_COMM_WORLD);
 		else { //Master
 			MPI_Request * reqs = new MPI_Request[world_size];
 			for (int i = 1; i < world_size; i++) {
