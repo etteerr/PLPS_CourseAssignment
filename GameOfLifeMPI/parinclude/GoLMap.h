@@ -14,7 +14,8 @@
 #endif
 
 //inc
-#include <stdio.h>
+#include <stdio.h> //alligned_alloc
+#include <cstdlib> //ALligned_alloc fix
 #include <emmintrin.h> //SSE2
 //def
 typedef unsigned long long int uint64;
