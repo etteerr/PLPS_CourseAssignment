@@ -203,7 +203,7 @@ int Gompi::generateAndDistribute() {
 				createWorldSegment(buffer, rowCounts[i]*caches);
 				//Send to waiting node
 				if (VERBOSE) printf("Master: Sending data to node %i (%lli)\n", i, countOnes(buffer, rowCounts[i]*caches));
-				MPI_Send(buffer,rowCounts[i]*caches,MPI_INT64_T, i, ECOMM_DATA, MPI_COMM_WORLD);
+				MPI_Send(buffer,rowCounts[i]*caches,MPI_LONG_LONG, i, ECOMM_DATA, MPI_COMM_WORLD);
 				//Get result (Recv directly to ensure no useless datatransfer)
 				MPI_Recv(&status, 1, MPI_INT, i, ECOMM_STATE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				//Dealloc
@@ -248,7 +248,7 @@ int Gompi::generateAndDistribute() {
 		MPI_Recv(&status, 1, MPI_INT, COMM_MASTER, ECOMM_STATE, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 		if (status == ESTATE_OK) {
 			waitForMessage(COMM_MASTER, ECOMM_DATA, MPI_COMM_WORLD);
-			MPI_Recv(buffer, rowCounts[world_rank]*caches, MPI_INT64_T, COMM_MASTER, ECOMM_DATA, MPI_COMM_WORLD, &recvStatus);
+			MPI_Recv(buffer, rowCounts[world_rank]*caches, MPI_LONG_LONG, COMM_MASTER, ECOMM_DATA, MPI_COMM_WORLD, &recvStatus);
 			//Send status
 			if (recvStatus.MPI_ERROR)
 				status = ESTATE_DATARECVERROR;
@@ -375,7 +375,7 @@ void Gompi::cascadeError() {
 		else { //Master
 			MPI_Request * reqs = new MPI_Request[world_size];
 			for (int i = 1; i < world_size; i++) {
-				MPI_Isend(&s, 1, MPI_INT64_T, i, ECOMM_STATE, MPI_COMM_WORLD, &reqs[i]);
+				MPI_Isend(&s, 1, MPI_LONG_LONG, i, ECOMM_STATE, MPI_COMM_WORLD, &reqs[i]);
 			}
 			printf("Master: Waiting 5 seconds for nodes to respond to error...\n");
 			sleep(5);
@@ -408,7 +408,7 @@ void Gompi::runMPI(uint64 steps) {
 		//Inc step
 		stepCounter++;
 		//sync
-		EMPI_Bcast(&stepCounter, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
+		EMPI_Bcast(&stepCounter, 1, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
 	}
 
 	//Cascade error
@@ -721,11 +721,11 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 			if (VERBOSE) printf("Node %i: sending to ranks (%i) & (%i)\n", world_rank, ((world_rank-1)%world_size+world_size)%world_size, ((world_rank+1)%world_size+world_size)%world_size);
 
 			//Share data with node 'above' and 'below'
-			EMPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &sendStatus1);
-			EMPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &sendStatus2);
+			EMPI_Isend(readMap->get64(1,0), readMap->getCacheCount64(), MPI_LONG_LONG, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &sendStatus1);
+			EMPI_Isend(readMap->get64(-2,0), readMap->getCacheCount64(), MPI_LONG_LONG, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &sendStatus2);
 			//Recv shared data (parallel ofc)
-			EMPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &requestStatus1);
-			EMPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_INT64_T, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &requestStatus2);
+			EMPI_Irecv(readMap->get64(0,0), readMap->getCacheCount64(), MPI_LONG_LONG, ((world_rank-1)%world_size+world_size)%world_size, ECOMM_DATA_DOWN, MPI_COMM_WORLD, &requestStatus1);
+			EMPI_Irecv(readMap->get64(-1,0), readMap->getCacheCount64(), MPI_LONG_LONG, ((world_rank+1)%world_size+world_size)%world_size, ECOMM_DATA_UP, MPI_COMM_WORLD, &requestStatus2);
 
 			//if (VERBOSE) printf("Node %i: Data received.\n", world_rank);
 		}
@@ -1025,7 +1025,7 @@ uint64 Gompi::getAlive()  {
 		uint64 ali = 0;
 		uint64 * alive = new uint64[world_size];
 		//sleep(4);
-		MPI_Gather(&personalAlive, 1, MPI_INT64_T, alive, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
+		MPI_Gather(&personalAlive, 1, MPI_LONG_LONG, alive, 1, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
 		for (int64 i = 0; i < world_size; i++)
 			ali += alive[i];
 		if (VERBOSE) printf("Node %i: Counting gathered.\n", world_rank);
@@ -1033,7 +1033,7 @@ uint64 Gompi::getAlive()  {
 	}
 
 	//Slave
-	MPI_Gather(&personalAlive, 1, MPI_INT64_T, 0, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
+	MPI_Gather(&personalAlive, 1, MPI_LONG_LONG, 0, 1, MPI_LONG_LONG, 0, MPI_COMM_WORLD);
 
 	if (VERBOSE) printf("Node %i: Counting send. (%lli)\n", world_rank, personalAlive);
 	return 0;
