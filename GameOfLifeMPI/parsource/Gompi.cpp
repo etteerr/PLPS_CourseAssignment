@@ -147,7 +147,7 @@ int Gompi::generateAndDistribute() {
 		}
 
 	}
-	printf("Node %i: %llu rows\n", world_rank, rowCounts[world_rank]);
+	if (VERBOSE) printf("Node %i: %llu rows\n", world_rank, rowCounts[world_rank]);
 
 	//Start distribution
 	{
