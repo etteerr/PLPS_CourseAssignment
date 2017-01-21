@@ -44,7 +44,7 @@ volatile const int ESTATE_UNDEFINEDERROR 	= 666;
 //inc
 #include <sys/sysinfo.h>
 #include <unistd.h> //sysconf
-#include <openmpi/mpi.h>
+#include <mpi.h>
 #include "../parinclude/GoLMap.h" //uint64/uchar
 
 
