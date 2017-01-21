@@ -17,6 +17,7 @@
 int main(int nargs, char **args) {
 	uint64 steps, mapx, mapy;
 	steps = mapx = mapy = 0;
+	bool sanityRun = true;
 
 	switch(nargs) {
 		case 1:
@@ -25,7 +26,8 @@ int main(int nargs, char **args) {
 			steps = 1;
 			break;
 		case 5:
-
+			sanityRun = false;
+			/* no break */
 		case 4:
 			steps = atoll(args[3]);
 			/* no break */
@@ -90,11 +92,11 @@ int main(int nargs, char **args) {
 	else gameoflife.getAlive();
 
 	//Print duration
-	if (gameoflife.getWorldRank()==0) printf("Computing time: %.5f\n", duration);
+	if (gameoflife.getWorldRank()==0) fprintf(stderr,"Computing time: %.5f\n", duration);
 
 	//printf("Node %i: Exited.\n", gameoflife.getWorldRank());
 
-	if (gameoflife.getWorldRank()==0 && gameoflife.getWorldSize() > 1) printProfiling();
+	if (gameoflife.getWorldRank()==0 && gameoflife.getWorldSize() > 1 && !sanityRun) printProfiling();
 
 	return gameoflife.getStatus();
 }
