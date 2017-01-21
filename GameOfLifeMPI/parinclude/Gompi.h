@@ -8,6 +8,8 @@
 #ifndef PARINCLUDE_GOMPI_H_
 #define PARINCLUDE_GOMPI_H_
 
+
+
 //Profiling
 #define EProfiling
 
@@ -123,8 +125,9 @@ private:
 	char processor_name[MPI_MAX_PROCESSOR_NAME];
 
 	//Global game data
-	int64 mapx, mapy;
+	uint64 mapx, mapy;
 	GoLMap *readMap = 0, *writeMap = 0;
+	uint64 caches; //Amount of 64 bits per row
 
 	//Node info
 	systeminfo sysnfo;
@@ -185,21 +188,18 @@ private:
 	/*
 	 * TODO runSolo documentation
 	 */
-	void runSolo(int64 steps);
+	void runSolo(uint64 steps);
 
 	/*
 	 * TODO runMaster documentation
 	 */
-	void runMPI(int64 steps);
+	void runMPI(uint64 steps);
 
 	/*
 	 * stepEdge, give structures with pointers containing  byte sized rows
 	 * 	Shift edge shifts the left edge x positions to accommodate for data padding
 	 */
-	void stepEdge(adjData left, uchar* resLeft, adjData right, uchar * resRight) {
-		stepEdge(left, resLeft, right, resRight, 0);
-	}
-	void stepEdge(adjData left, uchar* resLeft, adjData right, uchar* resRight, char shiftEdge);
+	void stepEdge(GoLMap & map, GoLMap & resultMap,  int64 row);
 	/*
 	 * step1, give pointers to most left cell of 3.
 	 * Thus the processed cell is pointer+1 in mid (result+1 is result)
@@ -211,7 +211,7 @@ private:
 	 * But leaving the edges of the 64bit sized chunk unprocessed (due to missing info)
 	 * results are directly written to the address specified in _rowresult
 	 */
-	void step64(int64 & rowchunk, int64 &rowabove, int64 & rowbelow, int64 & rowresult);
+	void step64(uint64 & rowchunk, uint64 &rowabove, uint64 & rowbelow, uint64 & rowresult);
 	/*
 	 * step128, takes uint64 sized chunks and processes them.
 	 * But leaving the edges of the 128bit sized chunk unprocessed (due to missing info)
@@ -233,8 +233,8 @@ private:
 	 * createWorldSegment()
 	 *
 	 */
-	void createWorldSegment(int64 & buffer);
-	void createWorldSegment(int64 * buffer, int64 size);
+	void createWorldSegment(uint64 & buffer, int);
+	void createWorldSegment(uint64 * buffer, uint64 size);
 
 	/*
 	 * TODO: DOcumentation
@@ -248,7 +248,7 @@ public:
 	/*
 	 * TODO Gompi constructor
 	 */
-	Gompi(int64 x, int64 y);
+	Gompi(uint64 x, uint64 y);
 	/*
 	 * TODO gompi deconstructor
 	 */
@@ -258,7 +258,7 @@ public:
 	 *
 	 * returns status
 	 */
-	int run(int64 steps);
+	int run(uint64 steps);
 
 	//GEtters/setters
 	int getStatus() { return status; };
@@ -269,7 +269,13 @@ public:
 	 *
 	 * 	Assumes manual reset of ghost rows IF not using MPI
 	 */
-	int64 getAlive();
+	uint64 getAlive();
+
+	/*
+	 * print
+	 * 	Prints the GOL map in console
+	 */
+	void print();
 
 	int getNameLength() const {
 		return name_length;

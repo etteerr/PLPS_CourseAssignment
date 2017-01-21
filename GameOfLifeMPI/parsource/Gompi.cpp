@@ -41,7 +41,7 @@ int __EMPI_WAIT(MPI_Request * req, MPI_Status *stat) {
 	return r;
 }
 
-void printBinary64(int64 &a) {
+void printBinary64(uint64 &a) {
 	for (int i = 0; i < 64; i++)
 		if ((a<<i)&0b1000000000000000000000000000000000000000000000000000000000000000)
 			printf("X");
@@ -50,8 +50,8 @@ void printBinary64(int64 &a) {
 	printf("\n");
 }
 
-void printBinary64(int64 *a, int64 c) {
-	for (int64 i = 0; i < c; i++)
+void printBinary64(uint64 *a, uint64 c) {
+	for (uint64 i = 0; i < c; i++)
 		printBinary64(a[i]);
 }
 
@@ -73,10 +73,10 @@ void Gompi::init_mpi() {
 	MPI_Get_processor_name(processor_name, &name_length);
 }
 
-int64 countOnes(int64 * p, int64 c) {
-	int64 count = 0;
+uint64 countOnes(uint64 * p, uint64 c) {
+	uint64 count = 0;
 
-	for(int64 cache = 0; cache < c; cache++) {
+	for(uint64 cache = 0; cache < c; cache++) {
 		count += __builtin_popcountll(p[cache]);
 	}
 
@@ -113,15 +113,15 @@ int Gompi::generateAndDistribute() {
 	srand(GOMPI_SEED);
 
 	//SHared vars
-	int64 * buffer;
+	uint64 * buffer;
 
 	if (world_size==1) {
 		readMap = new GoLMap(mapx, mapy);
 		writeMap = new GoLMap(mapx, mapy);
 
-		int64* buff;
+		uint64* buff;
 		buff = readMap->get64(0,0);
-
+		caches = readMap->getCacheCount64();
 		createWorldSegment(buff, readMap->getCacheCount64()*mapy);
 
 		//printf("Node %i: Ones %lli", world_rank, countOnes(buff, readMap->getCacheCount64()*mapy));
@@ -136,10 +136,10 @@ int Gompi::generateAndDistribute() {
 
 
 	//Calculate rows per node (done on every node) (So its global)
-	int64 rowCount = mapy/(int64)world_size;
-	int64 * rowCounts = new int64[world_size];
-	int64 rest = mapy%(int64)world_size;
-	for (int64 i = 0; i < world_size; i++) {
+	uint64 rowCount = mapy/(uint64)world_size;
+	uint64 * rowCounts = new uint64[world_size];
+	uint64 rest = mapy%(uint64)world_size;
+	for (uint64 i = 0; i < world_size; i++) {
 		rowCounts[i] = rowCount;
 		if (rest > 0) {
 			rowCounts[i]++;
@@ -148,9 +148,8 @@ int Gompi::generateAndDistribute() {
 	}
 
 	//Start distribution
-	int64 caches; //Amount of 64 bits per row
 	{
-		int64 oversize, sxo, sx;
+		uint64 oversize, sxo, sx;
 		sx = mapx;
 		if (sx % 128LL!=0) {
 			oversize= 128 -(sx % 128);
@@ -176,12 +175,28 @@ int Gompi::generateAndDistribute() {
 
 		//create and send 'their'  data
 		for (int i = 1; i < world_size; i++) {
+
+			//Create own data
+			//THis should be after sending.... But the seq implementation Implies using random, and we thus need this first
+			readMap = new GoLMap(mapx, rowCounts[0]+2);
+			writeMap = new GoLMap(mapx, rowCounts[0]+2);
+
+			if (VERBOSE) printf("Master: Creating own segment...\n");
+			if (readMap->isAllocated() && writeMap->isAllocated()) {
+				//Get a pointer to data of row 2 (row 1 is the row from warp, last row is the row from rank 1 machine)
+				buffer = readMap->get64(1,0);
+				//Fill this memory
+				createWorldSegment(buffer, (rowCounts[0])*caches);
+			}else
+				status = ESTATE_ALLOCATIONERROR;
+
+
 			//Send ok to recv
 			MPI_Send(&status, 1, MPI_INT,i, ECOMM_STATE, MPI_COMM_WORLD);
 			if (status==ESTATE_OK){
 				if (VERBOSE) printf("Master: Creating segment... (%.5f MB)\n", (float)(rowCounts[i]*caches*8)/(1024.0*1024.0));
 				//Allocate buffer
-				buffer = new int64[rowCounts[i]*caches];
+				buffer = new uint64[rowCounts[i]*caches];
 				//Create world
 				createWorldSegment(buffer, rowCounts[i]*caches);
 				//Send to waiting node
@@ -203,20 +218,6 @@ int Gompi::generateAndDistribute() {
 
 			return status;
 		}
-
-		//Create own data
-		//THis is after sending data because the buffer Can be HUGE
-		readMap = new GoLMap(mapx, rowCounts[0]+2);
-		writeMap = new GoLMap(mapx, rowCounts[0]+2);
-
-		if (VERBOSE) printf("Master: Creating own segment...\n");
-		if (readMap->isAllocated() && writeMap->isAllocated()) {
-			//Get a pointer to data of row 2 (row 1 is the row from warp, last row is the row from rank 1 machine)
-			buffer = readMap->get64(1,0);
-			//Fill this memory
-			createWorldSegment(buffer, (rowCounts[0])*caches);
-		}else
-			status = ESTATE_ALLOCATIONERROR;
 
 	}else{ //********************* SLAVE CODE ***********************
 
@@ -289,8 +290,8 @@ int Gompi::checkMemory() {
 	 * 		- Bcast (Master)  (Broadbast masters decision)
 	 */
 
-	int64 rowCount = mapy/(int64)world_size;
-	int64 masterExtra = mapy%(int64)world_size;
+	uint64 rowCount = mapy/(uint64)world_size;
+	uint64 masterExtra = mapy%(uint64)world_size;
 
 	//Get system info
 	getsysinfo(&sysnfo);
@@ -345,8 +346,8 @@ void Gompi::waitForMessage(int source, int tag, MPI_Comm comm) {
 	if (VERBOSE) printf("Node %i: Message received.\n", world_rank);
 }
 
-void Gompi::runSolo(int64 steps) {
-	int64 stepCounter = 0;
+void Gompi::runSolo(uint64 steps) {
+	uint64 stepCounter = 0;
 	GoLMap * tmp;
 
 	while(status==ESTATE_OK && stepCounter < steps) {
@@ -365,7 +366,7 @@ void Gompi::runSolo(int64 steps) {
 void Gompi::cascadeError() {
 	if (status) {
 		printf("Node %i: Initiating cascade error (%i)\n", world_rank, status);
-		int64 s = world_rank;
+		uint64 s = world_rank;
 		//Let all nodes be errored >:)
 		if (world_rank!=0) //Slave
 			MPI_Send(&s, 1, MPI_UINT64_T, 0, ECOMM_STATE, MPI_COMM_WORLD);
@@ -390,8 +391,8 @@ void Gompi::cascadeError() {
 	}
 }
 
-void Gompi::runMPI(int64 steps) {
-	int64 stepCounter = 0;
+void Gompi::runMPI(uint64 steps) {
+	uint64 stepCounter = 0;
 	GoLMap * tmp;
 
 	while(status==ESTATE_OK && stepCounter < steps) {
@@ -412,7 +413,7 @@ void Gompi::runMPI(int64 steps) {
 	//cascadeError();
 }
 
-Gompi::Gompi(int64 x, int64 y) {
+Gompi::Gompi(uint64 x, uint64 y) {
 	readMap = writeMap = 0;
 	mapx = x; mapy = y;
 	status = ESTATE_OK;
@@ -439,42 +440,60 @@ Gompi::~Gompi() {
 	if (VERBOSE) printf("Node %i: Bye bye! (%i)\n", world_rank, status);
 }
 
-void Gompi::stepEdge(adjData left, uchar* resLeft, adjData right,
-		uchar* resRight, char shift) {
+void stepInnerEdge(adjData left, uchar* resLeft, adjData right,
+		uchar* resRight) {
 	uchar el, er;
-	charuni l,r;
-	l.c = *resLeft;
-	r.c = *resRight;
+	charuni l,r, rl,rr;
+	l.c = *left.mid;
+	r.c = *right.mid;
 
-	//Correct padding error
-	l.c >>=shift;
+	rl.c = *resLeft;
+	rr.c = *resRight;
+
+	char shift = 0; //Redundant (gets optimzed out)
 
 	el = er = 0;
 
 	//This is now a stupid way of doing it (since i created the charunion)
 	//But what ever, it works
 	//Let us pray for compiler optimization, that it might optimize all >.<"
-	el = (*left.up>>1 & 0b00000001)  + (*left.up & 0b00000001) + (*right.up>>7 & 0b00000001) +
-		 (*left.mid>>1 & 0b00000001) +                         + (*right.mid>>7 & 0b00000001) +
-		 (*left.down>>1 & 0b00000001)+ (*left.down & 0b00000001)+ (*right.down>>7 & 0b00000001);
+	el = ((*left.up)>>(1+shift) & 0b00000001)  + ((*left.up)>>shift & 0b00000001) + (*right.up>>7 & 0b00000001) +
+		 (*(left.mid)>>(1+shift) & 0b00000001) +                         		  + (*right.mid>>7 & 0b00000001) +
+		 (*(left.down)>>(1+shift) & 0b00000001)+ (*left.down>>shift & 0b00000001) + (*right.down>>7 & 0b00000001);
 
-	er = (*left.up & 0b00000001)  + (*right.up>>7 & 0b00000001)  + (*right.up>>6 & 0b00000001) +
-		 (*left.mid & 0b00000001) +                         	 + (*right.mid>>6 & 0b00000001) +
-		 (*left.down & 0b00000001)+ (*right.down>>7 & 0b00000001)+ (*right.down>>6 & 0b00000001);
-
-
+	er = (*left.up>>shift & 0b00000001)  + (*right.up>>7 & 0b00000001)  + (*right.up>>6 & 0b00000001) +
+		 (*left.mid>>shift & 0b00000001) +                         	 	+ (*right.mid>>6 & 0b00000001) +
+		 (*left.down>>shift & 0b00000001)+ (*right.down>>7 & 0b00000001)+ (*right.down>>6 & 0b00000001);
 
 
-	l.bits.a = ((l.bits.a & (el==2)) | (el==3));
-	r.bits.h = ((r.bits.h & (er==2)) | (er==3));
 
-	*resLeft =  l.c<<shift; //shift back padding correction
-	*resRight = r.c;
+
+	rl.bits.a = ((l.bits.a && (el==2)) || (el==3));
+	rr.bits.h = ((r.bits.h && (er==2)) || (er==3));
+
+	*resLeft =  rl.c; //shift back padding correction
+	*resRight = rr.c;
 }
 
-void Gompi::step64(int64& rowchunk, int64& rowabove, int64& rowbelow,
-		int64& rowresult) {
-	int64 low, mid, high, c1,c2, a2, a3;
+void Gompi::stepEdge(GoLMap & map, GoLMap & resultMap,  int64 row) {
+	int64 sx = map.getsx()-1;
+
+	//Left is the right side of the map (due to warp: [map(left)]X[warpmap(right)]
+	char left = map.get(row-1, sx-1) + map.get(row-1, sx) + map.get(row-1, 0) //First row
+			  + map.get(row  , sx-1) +/*map.get(row  ,sx +*/map.get(row   ,0) //Mid row
+			  + map.get(row+1, sx-1) + map.get(row+1, sx) + map.get(row+1, 0);//bot row
+
+	char right = map.get(row-1,sx  ) + map.get(row-1,  0) + map.get(row-1, 1) //first row
+			   + map.get(row  ,sx  ) +/*map.get(row  , 0)+*/map.get(row  , 1)
+			   + map.get(row+1,sx  ) + map.get(row+1,  0) + map.get(row+1, 1);
+
+	resultMap.set(row,  0,  ( map.get(row, 0) && (right==2) ) || right==3 );
+	resultMap.set(row, sx,  ( map.get(row,sx) && (left ==2) ) || left ==3 );
+}
+
+void Gompi::step64(uint64& rowchunk, uint64& rowabove, uint64& rowbelow,
+		uint64& rowresult) {
+	uint64 low, mid, high, c1,c2, a2, a3;
 	low=mid=high=0;
 
 	//above
@@ -547,6 +566,7 @@ void Gompi::step64(int64& rowchunk, int64& rowabove, int64& rowbelow,
 }
 
 void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, __m128i* _rowresult) {
+	//Important node: Signed shift operations can create 1 on the left most (to keep the sign)
 	__m128i low, mid, high, c1,c2, a2, a3;
 	__m128i rowchunk, rowabove, rowbelow, rowresult;
 	low*=0;
@@ -574,8 +594,8 @@ void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, 
 	high |= c2;
 
 	//upperleft
-	c1 = low&(rowabove>>1);
-	low ^= (rowabove>>1);
+	c1 = low&shiftr128iAsUnsigned(&rowabove, 1);
+	low ^= shiftr128iAsUnsigned(&rowabove, 1);
 	c2 = mid & c1;
 	mid ^= c1;
 	high |= c2;
@@ -588,8 +608,8 @@ void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, 
 	high |= c2;
 
 	//lowerleft
-	c1 = low&(rowbelow>>1);
-	low ^= (rowbelow>>1);
+	c1 = low&shiftr128iAsUnsigned(&rowbelow,1);
+	low ^= shiftr128iAsUnsigned(&rowbelow,1);
 	c2 = mid & c1;
 	mid ^= c1;
 	high |= c2;
@@ -602,8 +622,8 @@ void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, 
 	high |= c2;
 
 	//midleft
-	c1 = low&(rowchunk>>1);
-	low ^= (rowchunk>>1);
+	c1 = low&shiftr128iAsUnsigned(&rowchunk,1);
+	low ^= shiftr128iAsUnsigned(&rowchunk,1);
 	c2 = mid & c1;
 	mid ^= c1;
 	high |= c2;
@@ -625,7 +645,8 @@ void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, 
 	 * if there are 3, new life or nothing
 	 * Apply border mask (64 bit operation)
 	 */
-	rowresult = ((a2&rowchunk)|a3)&0b0111111111111111111111111111111111111111111111111111111111111110;
+	rowresult = ((a2&rowchunk)|a3);
+	rowresult &=0b0111111111111111111111111111111111111111111111111111111111111110;
 
 	//save result
 	_mm_store_si128((__m128i*)_rowresult,rowresult);
@@ -633,26 +654,28 @@ void Gompi::step128(__m128i* _rowchunk, __m128i* _rowabove, __m128i* _rowbelow, 
 	//resolve internal border
 	adjData left, right;
 
-	left.up 	= ((uchar *)(((int64*)_rowabove)+0))+0;
-	left.mid 	= ((uchar *)(((int64*)_rowchunk)+0))+0;
-	left.down 	= ((uchar *)(((int64*)_rowbelow)+0))+0;
+	left.up 	= ((uchar *)(((uint64*)_rowabove)+0))+0;
+	left.mid 	= ((uchar *)(((uint64*)_rowchunk)+0))+0;
+	left.down 	= ((uchar *)(((uint64*)_rowbelow)+0))+0;
 
 	/*
 	 * the right part is one uint64 to the right.
 	 * Due to little endian, its the last char chunk of the uint64.
 	 * uint 64 has 8 char chunks
 	 */
-	right.up 	= ((uchar *)(((int64*)_rowabove)+1))+7;
-	right.mid 	= ((uchar *)(((int64*)_rowchunk)+1))+7;
-	right.down 	= ((uchar *)(((int64*)_rowbelow)+1))+7;
+	right.up 	= ((uchar *)(((uint64*)_rowabove)+1))+7;
+	right.mid 	= ((uchar *)(((uint64*)_rowchunk)+1))+7;
+	right.down 	= ((uchar *)(((uint64*)_rowbelow)+1))+7;
 
 	//Repeat for target
 	uchar * tl, * tr;
-	tl = ((uchar*)((int64 *) _rowresult+0))+0;
-	tr = ((uchar*)((int64 *) _rowresult+1))+7;
+	tl = ((uchar*)((uint64 *) _rowresult+0))+0;
+	tr = ((uchar*)((uint64 *) _rowresult+1))+7;
 
 	//call stepEdge
-	stepEdge(left, tl, right, tr);
+	stepInnerEdge(left, tl, right, tr);
+
+
 }
 
 void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
@@ -714,7 +737,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 		 * BLoks of 128 are ensured by map (data is appended to 128 bits multiple for every row)
 		 */
 		#pragma omp parallel for default(none) shared(map, newmap,parallelProcessing, flags) if(parallelProcessing)
-		for (int64 cache = 0; cache < map.getCacheCount128(); cache++) {
+		for (uint64 cache = 0; cache < map.getCacheCount128(); cache++) {
 			//Pointers
 			__m128i *above, *below, *current, *target;
 
@@ -796,7 +819,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 				}
 				else { //Request answered
 					if (VERBOSE) printf("Node %i: Top row received\n", world_rank );
-					for (int64 i = 0; i < readMap->getCacheCount128(); i++) {
+					for (uint64 i = 0; i < readMap->getCacheCount128(); i++) {
 						//Get caches
 						above  = 	readMap->get128(0,i);
 						current=	readMap->get128(1,i);
@@ -828,7 +851,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 				}
 				else { //Request answered
 					if (VERBOSE) printf("Node %i: Bottom row received\n", world_rank );
-					for (int64 i = 0; i < readMap->getCacheCount128(); i++) {
+					for (uint64 i = 0; i < readMap->getCacheCount128(); i++) {
 						//Get caches
 						above  = 	readMap->get128(-3,i);
 						current=	readMap->get128(-2,i);
@@ -856,12 +879,12 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 		end = map.getsy();
 	}
 
-	// ************* border annealing ************
+	// ************* 128bits border annealing ************
 	if (map.getCacheCount128()>1) {
 		//Anneal all 128bits borders
 		//128/8 = make steps of 128 in 8 bit cache (to get the 128 bits borders)
 		#pragma omp parallel for default(none) shared(map, newmap, flags, start, end) if(parallelProcessing)
-		for (int64 cache = 128/8; cache < map.getCacheCount8(); cache+=128/8) {
+		for (uint64 cache = (128/8)-1; cache < map.getCacheCount8(); cache+=128/8) {
 			uchar *ltarget;
 			uchar *rtarget;
 			adjData left, right;
@@ -893,7 +916,7 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 				rtarget = newmap.get8(row, cache+1);
 
 				//step
-				stepEdge(left, ltarget, right, rtarget);
+				stepInnerEdge(left, ltarget, right, rtarget);
 
 			}
 		}
@@ -904,27 +927,8 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 	//**************** HORIZONTAL WARP ******************
 	#pragma omp parallel for default(none) shared(map, newmap, flags, start, end) if(parallelProcessing)
 	for(int64 row = start; row < end; row++) {
-		uchar *ltarget;
-		uchar *rtarget;
-		adjData left, right;
-
-		//Gather pointers
-		right.up = 	map.get8(row-1, 0);
-		right.mid = map.get8(row, 	0);
-		right.down =map.get8(row+1,	0);
-
-		left.up = 	map.get8(row-1, map.getsx()/8);
-		left.mid = 	map.get8(row, 	map.getsx()/8);
-		left.down = map.get8(row+1,	map.getsx()/8);
-
-		ltarget = newmap.get8(row, map.getsx()/8);
-		rtarget = newmap.get8(row, 0);
-
 		//********** PROCCESSING ********
-		char shift = 8-(map.getsx()%8);
-		if (shift == 8)
-			shift = 0;
-		stepEdge(left, ltarget, right, rtarget, shift);
+		stepEdge(map, newmap, row);
 	}
 
 
@@ -939,24 +943,41 @@ void Gompi::stepGeneral(GoLMap& map, GoLMap& newmap, char flags) {
 	}
 }
 
-void Gompi::createWorldSegment(int64 & seg) {
+void Gompi::createWorldSegment(uint64 & seg, int randcalls) {
 	seg = 0;
-	//float j;
-	//for(int i = 0; i < 64; i++) {
-	//	j = (float)rand()/(float)(RAND_MAX);
-	//	if (j>=0.5)
-	//		seg+=0b1;
-	//	seg <<= 1;
-	//}
-	seg = ((int64)(rand())<<32) + ((int64)(rand()));
+
+	if (randcalls < 0)
+		return;
+
+	float j;
+	for(int i = 0; i < 64; i++) {
+		seg <<= 1;
+		if (i < randcalls) {
+			j = rand()/((float)RAND_MAX + 1);
+			if (!(j<0.5))
+				seg+=0b1;
+		}
+	}
+//	seg = ((int64)(rand())<<32) + ((int64)(rand()));
+
 	//printBinary64(seg);
 }
 
-void Gompi::createWorldSegment(int64* buffer, int64 size) {
+void Gompi::createWorldSegment(uint64* buffer, uint64 size) {
 	//Parallel screws over random generation
+	//Assumption is that each buffer is the beginning of a row.
+	//To emulate the behavior of map generation of the gol-seq
+	//We need to short the last segment of each row
 //#pragma omp parallel for default(none) shared(buffer, size)
-	for (int64 i = 0; i < size; i++)
-		createWorldSegment(buffer[i]);
+	for (uint64 i = 0; i < size; i++) {
+		int test = ((i%caches)) ; //Create variable to fix assembly based seg fault with (MOVE 0x130(%rax),%rdi)
+		if (((test+1)*64)>mapx)
+			createWorldSegment(buffer[i], mapx-(i%caches)*64);
+		else
+			createWorldSegment(buffer[i], 64);
+
+//		printBinary64(buffer[i]);
+	}
 }
 
 void Gompi::getsysinfo(systeminfo* nfo) {
@@ -972,7 +993,7 @@ void Gompi::getsysinfo(systeminfo* nfo) {
 	nfo->cores = sysconf(_SC_NPROCESSORS_ONLN);
 }
 
-int Gompi::run(int64 steps) {
+int Gompi::run(uint64 steps) {
 	if (world_size == 1)
 		runSolo(steps);
 	else
@@ -981,13 +1002,13 @@ int Gompi::run(int64 steps) {
 	return status;
 }
 
-int64 Gompi::getAlive()  {
+uint64 Gompi::getAlive()  {
 
 	if (VERBOSE) printf("Node %i: Counting started...\n", world_rank);
 	//Rest ghosts
 	readMap->resetFalseBorder();
 	if (world_size>1)
-		for(int64 i = 0; i < readMap->getCacheCount64(); i++) {
+		for(uint64 i = 0; i < readMap->getCacheCount64(); i++) {
 			*readMap->get64(0, i) = 0ll;
 			*readMap->get64(-1, i) = 0ll;
 		}
@@ -996,14 +1017,14 @@ int64 Gompi::getAlive()  {
 	}
 
 	//get alive
-	int64 personalAlive = readMap->getAlive();
+	uint64 personalAlive = readMap->getAlive();
 
 	if (world_rank==0) {
-		int64 ali = 0;
-		int64 * alive = new int64[world_size];
+		uint64 ali = 0;
+		uint64 * alive = new uint64[world_size];
 		//sleep(4);
 		MPI_Gather(&personalAlive, 1, MPI_INT64_T, alive, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
-		for (int64 i = 0; i < world_size; i++)
+		for (uint64 i = 0; i < world_size; i++)
 			ali += alive[i];
 		if (VERBOSE) printf("Node %i: Counting gathered.\n", world_rank);
 		return ali;
@@ -1014,4 +1035,8 @@ int64 Gompi::getAlive()  {
 
 	if (VERBOSE) printf("Node %i: Counting send. (%lli)\n", world_rank, personalAlive);
 	return 0;
+}
+void Gompi::print(){
+	printBinary64(readMap->get64(0,0), readMap->getsy()*readMap->getCacheCount64());
+	printf("\n");
 }

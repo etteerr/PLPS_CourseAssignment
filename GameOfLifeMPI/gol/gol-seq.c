@@ -101,13 +101,16 @@ int main(int argc, char *argv[]) {
       x = rand()/((float)RAND_MAX + 1);
       if(x<0.5){
 	old[i][j] = 0;
+		  //printf("0");
       } else {
 	old[i][j] = 1;
+		  //printf("X");
       }
     }
+	  //printf("\n");
   }
 	
-	  /*  Iterations are done; sum the number of live cells */
+	  /*  Init is done; sum the number of live cells */
   isum = 0;
   for(i=1; i<=bwidth; i++){
     for(j=1; j<=bheight; j++){
@@ -141,7 +144,12 @@ int main(int argc, char *argv[]) {
   for(i=1; i<=bwidth; i++){
     for(j=1; j<=bheight; j++){
       isum = isum + new[i][j];
+		//if (new[i][j])
+			//printf("X");
+		//else
+			//printf("0");
     }
+	 // printf("\n");
   }
 
   printf("Number of live cells = %d\n", isum);
