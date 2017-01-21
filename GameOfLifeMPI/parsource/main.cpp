@@ -25,6 +25,8 @@ int main(int nargs, char **args) {
 			mapy = 3;
 			steps = 1;
 			break;
+		case 5:
+
 		case 4:
 			steps = atoll(args[3]);
 			/* no break */
@@ -53,8 +55,10 @@ int main(int nargs, char **args) {
 
 
 	//print intial alive
-	if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
-	else gameoflife.getAlive();
+	if (VERBOSE) {
+		if (gameoflife.getWorldRank()==0) printf("Alive: %lli\n", gameoflife.getAlive());
+		 else gameoflife.getAlive();
+	}
 
 	//Init timer
 	timeval start, end;
@@ -83,7 +87,7 @@ int main(int nargs, char **args) {
 
 
 	//Print alive cells
-	if (gameoflife.getWorldRank()==0) printf("Number of live cells = %d\n", gameoflife.getAlive());
+	if (gameoflife.getWorldRank()==0) printf("Number of live cells = %llu\n", gameoflife.getAlive());
 	else gameoflife.getAlive();
 
 	//Print duration

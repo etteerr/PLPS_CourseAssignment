@@ -972,7 +972,7 @@ void Gompi::createWorldSegment(uint64* buffer, uint64 size) {
 	//We need to short the last segment of each row
 //#pragma omp parallel for default(none) shared(buffer, size)
 	for (uint64 i = 0; i < size; i++) {
-		int test = ((i%caches)) ; //Create variable to fix assembly based seg fault with (MOVE 0x130(%rax),%rdi)
+		unsigned int test = ((i%caches)) ; //Create variable to fix assembly based seg fault with (MOVE 0x130(%rax),%rdi)
 		if (((test+1)*64)>mapx)
 			createWorldSegment(buffer[i], mapx-(i%caches)*64);
 		else
@@ -1026,7 +1026,7 @@ uint64 Gompi::getAlive()  {
 		uint64 * alive = new uint64[world_size];
 		//sleep(4);
 		MPI_Gather(&personalAlive, 1, MPI_INT64_T, alive, 1, MPI_INT64_T, 0, MPI_COMM_WORLD);
-		for (uint64 i = 0; i < world_size; i++)
+		for (int64 i = 0; i < world_size; i++)
 			ali += alive[i];
 		if (VERBOSE) printf("Node %i: Counting gathered.\n", world_rank);
 		return ali;
