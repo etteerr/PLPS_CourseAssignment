@@ -1,7 +1,7 @@
 IDIR = -I./parinclude
 CFLAGS=$(IDIR) -lm -MMD -MP -fmessage-length=0 -O3 -Wall # -fopenmp -std=c++0x
 
-LIBS=-lgomp
+LIBS=#-lgomp
 
 CPP = mpic++
 
