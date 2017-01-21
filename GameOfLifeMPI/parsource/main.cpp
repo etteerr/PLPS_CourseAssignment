@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <chrono>
 #include "../parinclude/Gompi.h"
 #include <sys/time.h>
 
