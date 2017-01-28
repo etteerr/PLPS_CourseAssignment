@@ -20,7 +20,7 @@ import ibis.ipl.WriteMessage;
 public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     
     
-    private static final int stepsPerNode = 13; //Beyond 13 = GC overhead limit exceeded
+    private static final int stepsPerNode = 10; //Beyond 13 = GC overhead limit exceeded
 
 	PortType portTypeS = new PortType(
     		PortType.COMMUNICATION_RELIABLE,
