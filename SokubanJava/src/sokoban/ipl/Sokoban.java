@@ -41,6 +41,7 @@ public class Sokoban {
 					}
 					System.out.println("Solving game possible in "+solutions+" ways of "+ipl.bound+" steps");
 		//			Solving game possible in 1 ways of 12 steps
+					System.exit(0); //Prevent runaway services
 				}
 			}else {
 				ipl.run();
