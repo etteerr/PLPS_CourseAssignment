@@ -3,7 +3,6 @@ package sokoban.ipl;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 
 import ibis.ipl.Ibis;
 import ibis.ipl.IbisCapabilities;
@@ -17,7 +16,6 @@ import ibis.ipl.ReceiveTimedOutException;
 import ibis.ipl.RegistryEventHandler;
 import ibis.ipl.SendPort;
 import ibis.ipl.WriteMessage;
-import ibis.ipl.impl.SendPortIdentifier;
 
 public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     
@@ -119,15 +117,15 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 	}
 	
 	void shutdown() {
+		myIbis.registry().disableEvents();
 		if (iAmServer) {
 			try {
 				jobs = new ArrayList<Board>();//Make jobs empty
-				Thread.sleep(5000);
 				runServerStep(); //handle final requests
 				serverRecvPort.disableConnections();
 				serverRecvPort.disableMessageUpcalls();
 				serverRecvPort.close(1000);
-			} catch (IOException | InterruptedException e) {
+			} catch (IOException e) {
 	
 			}
 			
@@ -141,7 +139,6 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		}
 		
 		//General clean
-		myIbis.registry().disableEvents();
 		
 		try {
 			if (clientSendPort!=null)
