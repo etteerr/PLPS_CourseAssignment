@@ -3,13 +3,10 @@ package sokoban.ipl;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
-import ibis.io.IbisSerializationInputStream;
-import ibis.io.IbisSerializationOutputStream;
 import ibis.ipl.ReadMessage;
 import ibis.ipl.WriteMessage;
 
@@ -35,6 +32,34 @@ public class Board {
 	
 	public Board(Board board) {
 		init(board);
+	}
+	
+	@Override
+	public int hashCode() {
+		return (curBoard+playerX+":"+playerY+":"+moves).hashCode();
+	}
+	
+	@Override
+	public boolean equals(Object obj) {
+	    if (obj == null) {
+	        return false;
+	    }
+	    if (!Board.class.isAssignableFrom(obj.getClass())) {
+	        return false;
+	    }
+	    final Board other = (Board) obj;
+	    if ((this.curBoard == null) ? (other.curBoard != null) : !this.curBoard.equals(other.curBoard)) {
+	        return false;
+	    }
+	    
+	    if (this.moves!=other.moves)
+	    	return false;
+	    
+	    if (this.playerX != other.playerX || this.playerY != other.playerY)
+	    	return false;
+	    
+	    
+	    return true;
 	}
 	
 	public Board(ReadMessage reader) throws IOException {

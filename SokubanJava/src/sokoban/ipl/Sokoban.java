@@ -14,10 +14,11 @@ public class Sokoban {
 	 */
 	public static void main(String[] args) {
 		IkoPanLayer ipl = null;
+		String fileName = args[0];
 		
 		try {
 			ipl = new IkoPanLayer();
-			ipl.initJobs(new Board("tests/t1.txt"));
+			ipl.initJobs(new Board(fileName));
 		} catch (Exception e1) {
 			// TODO Auto-generated catch block
 			e1.printStackTrace();
@@ -25,7 +26,19 @@ public class Sokoban {
 		}
 		
 		try {
+			System.out.print("Bound now:");
+			long start = System.currentTimeMillis();
 			ipl.run();
+			long end = System.currentTimeMillis();
+			System.err.println("Sokoban took " + (end - start) + " milliseconds");
+//			Bound now: 1 2 3 4 5 6 7 8 9 10 11 12
+			int solutions = 0;
+			for (Board i : ipl.getSolutions()) {
+				if (i.getMoves() == ipl.bound)
+					solutions++;
+			}
+			System.out.println("Solving game possible in "+solutions+" ways of "+ipl.bound+" steps");
+//			Solving game possible in 1 ways of 12 steps
 			ipl.shutdown();
 		} catch (Exception e) {
 			// TODO Auto-generated catch block

@@ -39,6 +39,7 @@ public class Sokoban {
 		int result = 0;
 
 		if(board.isSolved()) {
+			//System.out.print(board.toString());
 			return 1;
 		}
 

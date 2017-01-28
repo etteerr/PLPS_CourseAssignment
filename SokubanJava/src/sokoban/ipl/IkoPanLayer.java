@@ -2,6 +2,8 @@ package sokoban.ipl;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
 
 import ibis.ipl.Ibis;
 import ibis.ipl.IbisCapabilities;
@@ -15,11 +17,12 @@ import ibis.ipl.ReceiveTimedOutException;
 import ibis.ipl.RegistryEventHandler;
 import ibis.ipl.SendPort;
 import ibis.ipl.WriteMessage;
+import ibis.ipl.impl.SendPortIdentifier;
 
 public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     
     
-    private static final int stepsPerNode = 5;
+    private static final int stepsPerNode = 20;
 
 	PortType portTypeS = new PortType(
     		PortType.COMMUNICATION_RELIABLE,
@@ -33,7 +36,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     		PortType.COMMUNICATION_RELIABLE,
             PortType.SERIALIZATION_DATA, 
             PortType.RECEIVE_EXPLICIT,
-            //PortType.RECEIVE_TIMEOUT,
+            PortType.RECEIVE_TIMEOUT,
             PortType.CONNECTION_ONE_TO_MANY
             );
 
@@ -55,6 +58,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 	private static final String doneRequestAnswer = "done";
 	private static final String replyMessageFailedToSolve = "failed";
 	private static final String replyMessageSolutionFound = "Solution";
+	private static final String waitRequestAswer = "not ready";
     
     //Global ibis (local)
     Ibis myIbis;
@@ -70,14 +74,18 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     IbisIdentifier server;
     BoardCache boardCache;
     ArrayList<Board> jobs;
+    ArrayList<Board> jobsBusyOrDone;
     private Object jobsLock = new Object();
     private ArrayList<IbisIdentifier> boardRequests;
+    int bound = 0;
     
     //client data
     int steps = 1;
     SendPort clientSendPort;
     ReceivePort clientRecvReplyPort;
     ArrayList<Board> unsolvedBoards;
+
+	private ArrayList<Board> serverSolutions;
 
 	
 
@@ -106,15 +114,20 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 			Thread.sleep(100);
 		
 		//Initialize client if we are not a server
-		if (!server.equals(myIbis.identifier())) 
+		//if (!server.equals(myIbis.identifier())) 
 			initClient();
 	}
 	
 	void shutdown() {
 		if (iAmServer) {
 			try {
-				serverRecvPort.close();
-			} catch (IOException e) {
+				jobs = new ArrayList<Board>();//Make jobs empty
+				Thread.sleep(5000);
+				runServerStep(); //handle final requests
+				serverRecvPort.disableConnections();
+				serverRecvPort.disableMessageUpcalls();
+				serverRecvPort.close(1000);
+			} catch (IOException | InterruptedException e) {
 	
 			}
 			
@@ -137,7 +150,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		
 		try {
 			if(clientRecvReplyPort!=null)
-				clientRecvReplyPort.close();
+				clientRecvReplyPort.close(1000);
 		} catch (IOException e1) {
 	
 		}
@@ -148,6 +161,10 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		} catch (IOException e) {
 	
 		}
+	}
+	
+	public ArrayList<Board> getSolutions() {
+		return serverSolutions;
 	}
 
 	private void initClient() throws IOException {		
@@ -175,18 +192,54 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		serverRecvPort.enableMessageUpcalls();
 		SendPort serverReplyPort = myIbis.createSendPort(portTypeR);
 		otmh = new OneToManyHandler(serverReplyPort, replyPort);
+		serverSolutions = new ArrayList<Board>();
 		
 		//Enable registry (to allow for newly joined ibises)
 		//myIbis.registry().enableEvents(); //<-- causes events to hang
 	}
 
+	public void initJobs(Board initBoard) throws InterruptedException {
+		//System.out.println("initJobs: "+iAmServer);
+		if (!iAmServer) {
+			return;
+		}
+		
+		initialBoard = new Board(initBoard);
+	
+		//Generate jobs
+		synchronized(jobsLock){
+			jobs = new ArrayList<Board>();
+			jobsBusyOrDone = new ArrayList<Board>();
+			
+			ArrayList<Board> boards = (ArrayList<Board>) initBoard.generateChildren(boardCache);
+			for(Board b : boards) {
+				jobs.addAll(b.generateChildren(boardCache));
+			}
+		}
+		
+		//Initial board output
+		System.out.println("Running Sokoban, initial board:");
+		System.out.println(initBoard.toString());
+	}
+
 	public void run(){
 		appRunning = true;
+		new Thread(new Runnable() {
+		    public void run() {
+		    	while(appRunning && !myIbis.registry().hasTerminated() ){
+		    		runClientStep();
+		    	}
+		    }
+		}).start();
 		while(appRunning && !myIbis.registry().hasTerminated() ) {
 			if (iAmServer) 
 				runServerStep();
 			else
-				runClientStep();
+				try {
+					Thread.sleep(1000);
+				} catch (InterruptedException e) {
+				}
+				
 		}
 	}
 	
@@ -200,95 +253,49 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		} catch (Exception e) {
 			System.err.println("Error while requesting board: "+e.getMessage());
 			e.printStackTrace();
-			try {
-				connectToServer(server);
-			} catch (IOException e1) {
-				// TODO Auto-generated catch block
-				e1.printStackTrace();
-			}
 			return;
 		}
 		
 		//Get answer
 		Board b = getRequestedBoardReply();
 		
+		
 		//Process board
-		processBoard(b);
+		ArrayList<Board> sols = processBoard(b);
+		
+		//Send the result
+		//If b is solved, send b. If not, send global unsolved
+		sendBoardReply(sols);
 	}
 	
-	private void runServerStep() {
-		//Check recv connection
-		serverRecvPort.toString();
+	private void sendBoardReply(ArrayList<Board> solutions) {
 		
-		synchronized(boardRequests) {
-			for(IbisIdentifier id : boardRequests) {
-				handleBoardRequest(id);
-			}
-			boardRequests.clear();
-		}
-		
-	}
-
-	private void processBoard(Board recvBoard) {
-		if (recvBoard==null)
-			//Nothing to to
+		if (solutions == null)
 			return;
 		
-		if (recvBoard.isSolved())
-			//Nothing to do
+		if (unsolvedBoards.isEmpty())
 			return;
 		
-		//Init board array
-		unsolvedBoards.clear();
-		unsolvedBoards.add(recvBoard);
-		
-		System.out.println("Solving board...");
-		
-		//Init temp board array
-		ArrayList<Board> tmp = new ArrayList<Board>();
-		
-		//For determined steps, keep solving all boards
-		for (int i = 0; i < steps; i++) {
-			for (Board b : unsolvedBoards) {
-				//SOlve board
-				
-				//But not if solved already
-				if (b.isSolved()) {
-					recvBoard = b;
-					break;
-				}
-				
-				//And prune
-				if (b.getMoves() < shortest)
-					//Step 1
-					tmp.addAll(b.generateChildren(boardCache));
-				
-				
-			}
-			
-			//add/clear boards and repeat
-			//Except for when one is solved
-			if (recvBoard.isSolved())
-				break;
-			unsolvedBoards.clear();
-			unsolvedBoards.addAll(tmp);
-			tmp.clear();
-		}
-		
-		//Report and go it all over again :)
+		//Report
 		try {
 			WriteMessage boardFinished = clientSendPort.newMessage();
 			
-			if (recvBoard.isSolved()) {
+			if (!solutions.isEmpty()) {
 				boardFinished.writeString(replyMessageSolutionFound);
-				recvBoard.fillMessage(boardFinished);
+				boardFinished.writeInt(solutions.size());
+				for(Board b : solutions)
+					b.fillMessage(boardFinished);
+				boardFinished.writeInt(unsolvedBoards.size());
+				for (Board b : unsolvedBoards) {
+					b.fillMessage(boardFinished);
+				}
 			}else{
 				boardFinished.writeString(replyMessageFailedToSolve);
 				boardFinished.writeInt(unsolvedBoards.size());
 				for (Board b : unsolvedBoards) {
 					b.fillMessage(boardFinished);
 				}
-				recvBoard.fillMessage(boardFinished);
+				//ourBoard.fillMessage(boardFinished);
 			}
 			//Send message
 			boardFinished.send();
@@ -302,14 +309,86 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		
 	}
 
+	private void runServerStep() {
+		//Check recv connection
+		serverRecvPort.toString();
+		
+		synchronized(boardRequests) {
+			for(IbisIdentifier id : boardRequests) {
+				handleBoardRequest(id);
+			}
+			boardRequests.clear();
+		}
+		
+	}
+
+	private ArrayList<Board> processBoard(Board recvBoard) {
+		if (recvBoard==null)
+			//Nothing to to
+			return null;
+		
+		//Init board array
+		unsolvedBoards.clear();
+		unsolvedBoards.add(recvBoard);
+		
+//		System.out.println("Solving board...");
+		
+		//Init temp board array
+		HashSet<Board> tmp = new HashSet<Board>();
+		ArrayList<Board> solutions = new ArrayList<Board>();
+		
+		
+		if (recvBoard.isSolved()){
+			solutions.add(recvBoard);
+			return solutions;
+		}
+		//From bound to bound
+		int from = recvBoard.getMoves();
+		int to = recvBoard.getMoves()+steps;
+		
+		//For determined steps, keep solving all boards
+		for (int i = from; i < to; i++) {
+			for (Board b : unsolvedBoards) {
+				//SOlve board
+				
+				//if solved, store
+				if (b.isSolved()) {
+					solutions.add(b);
+				}else
+				
+				//And prune
+				if (b.getMoves() <= shortest)
+					//Step 1
+					if (b.getMoves() > i)
+						tmp.add(b); //On the bound or out of bound
+					else
+						tmp.addAll(b.generateChildren(boardCache));
+				
+				
+			}
+			
+			//add/clear boards and repeat
+			//Except for when one is solved
+			if (!solutions.isEmpty())
+				break;
+			
+			unsolvedBoards.clear();
+			unsolvedBoards.addAll(tmp);
+			tmp.clear();
+		}
+		
+		return solutions;
+		
+	}
+
 	private Board getRequestedBoardReply() {
 		ReadMessage reply;
 		String cmd = "err";
 		
 		//Get reply message
 		try{
-			//TODO set timeout
-			reply = clientRecvReplyPort.receive();
+			// set timeout
+			reply = clientRecvReplyPort.receive(5000);
 			cmd = reply.readString();
 		}catch (ReceiveTimedOutException e) {
 			reply = null;
@@ -325,6 +404,8 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 			appRunning = false;
 			try {
 				reply.finish();
+				clientSendPort.disconnect(server, serverPort);
+				clientSendPort.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -352,7 +433,8 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		if (reply!=null)
 			try {
 				reply.finish();
-			} catch (IOException e) {
+				Thread.sleep(500);
+			} catch (IOException | InterruptedException e) {
 				System.err.println("Error with reply:");
 				System.err.println(e.getMessage());
 			}
@@ -375,25 +457,6 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		}
 	}
 
-	public void initJobs(Board initBoard) throws InterruptedException {
-		//System.out.println("initJobs: "+iAmServer);
-		if (!iAmServer) {
-			return;
-		}
-		
-		initialBoard = new Board(initBoard);
-
-		//Generate jobs
-		synchronized(jobsLock){
-			jobs = new ArrayList<Board>();
-			
-			ArrayList<Board> boards = (ArrayList<Board>) initBoard.generateChildren(boardCache);
-			for(Board b : boards) {
-				jobs.addAll(b.generateChildren(boardCache));
-			}
-		}
-	}
-	
 	public void waitForEnd() throws IOException {
 		myIbis.registry().waitUntilTerminated();
 		shutdown();
@@ -407,29 +470,62 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		if (jobs.isEmpty())
 			return null;
 		
+		Board selected = null;
+		
+		ArrayList<Board> toBePruned = new ArrayList<Board>();
+		
 		synchronized(jobsLock){
-			for(int i = 0; i < maxMoves; i++){
+			outerloop:
+			while(true){
 				for (Board b : jobs) {
-					if (b.getMoves() < i) {
-						jobs.remove(b);
-						return b;
+					if (b.getMoves() < bound) {
+						selected = b;
+						break outerloop;
 					}
 					//Prune
 					if (b.getMoves() > shortest)
-						jobs.remove(b);
+						toBePruned.add(b);
 				}
+			if (bound < shortest){	
+				bound++;
+				System.out.print(" "+bound);
+			}else
+				return null;
 			}
-		}
-		return null;
+			//prune
+			jobs.removeAll(toBePruned);
+			jobsBusyOrDone.add(selected); //Keep a record of send jobs. If jobs is empty without a solution, network has failed somewhere
+			jobs.remove(selected);
+			
+		} //Release lock
+		
+		return selected;
+	}
+	
+	private void pruneJobs(int moves) {
+		ArrayList<Board> toBePruned = new ArrayList<Board>();
+		
+		synchronized(jobsLock){
+			for (Board b : jobs) {
+				//Prune
+				if (b.getMoves() > moves)
+					toBePruned.add(b);
+			}
+			
+			//prune
+//			System.out.println("Pruned " + toBePruned.size() + " jobs.");
+			jobs.removeAll(toBePruned);
+			
+		} //Release lock
 	}
 
 	@Override
 	public void upcall(ReadMessage msg) throws IOException, ClassNotFoundException {
 		//Server handles requests
-		System.out.println("From "+msg.origin().name());
+//		System.out.println("From "+msg.origin().name());
 		String req = msg.readString();
-		System.out.println("Request: "+req);
-		
+//		System.out.println("Request: "+req);
+//		System.err.println("Message size : " + msg.remaining());
 		
 		if (req.equals(boardRequestMessage))
 		{
@@ -439,18 +535,26 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		}else if (req.equals(replyMessageSolutionFound)) {
 			//Solution found
 			//Prune all boards
-			Board b = new Board(msg);
-			if (b.isSolved())
-				shortest = b.moves;
+			//appRunning = false;
+			int sols = msg.readInt();
+			for(int i = 0; i < sols; i++){
+				Board b = new Board(msg);
+				if (b.isSolved())
+					if (b.moves < shortest)
+						shortest = b.moves;
+				serverSolutions.add(b);
+			}
+			addJobs(msg);
 			msg.finish(); //Locks shortests in upCall
+			pruneJobs(shortest);
 			
 			//Send limiter
 			for (IbisIdentifier i : otmh.getReceivePortIdentifiers()) {
 				myIbis.registry().signal(""+shortest, i);
 			}
-			//TODO remove print statements
-			System.out.println("Solution!");
-			System.out.println(b.toString());
+			//remove print statements
+//			System.out.println("Solution!");
+			//System.out.println(b.toString());
 			
 		}else if (req.equals(replyMessageFailedToSolve)) {
 			addJobs(msg);
@@ -458,10 +562,10 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		}
 		
 		//TODO remove print statements
-		if (jobs!=null)
-			System.out.println("Jobs: " + jobs.size());
-		else
-			System.out.println("no jobs");
+//		if (jobs!=null)
+//			System.out.println("Jobs: " + jobs.size());
+//		else
+//			System.out.println("no jobs");
 	}
 	
 	private void planBoardRequestHandle(ReadMessage msg) {
@@ -478,10 +582,13 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 			
 			//If jobs is not initialized, let the slaves wait
 			if (jobs == null) 
-				reply.writeString("not ready");
+				reply.writeString(waitRequestAswer);
 			//If jobs is empty, we are done
-			else if ((b=selectBoard(shortest))==null) 
-				reply.writeString(doneRequestAnswer);
+			else if ((b=selectBoard(bound))==null) 
+				if (!serverSolutions.isEmpty())
+					reply.writeString(doneRequestAnswer);
+				else
+					reply.writeString(waitRequestAswer);
 			//write a formal letter
 			else {
 				reply.writeString(boardRequestAnswer);
@@ -507,7 +614,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 			for (int i = 0; i < im; i++) {
 				Board b = new Board(msg);
 				//Prune
-				if (b.getMoves() < shortest)
+				if (b.getMoves() <= shortest)
 					jobs.add(b);
 			}
 		}
@@ -538,7 +645,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		//Initialize correct ports if we are server
 		if (trumpPerson.equals(myIbis.identifier())) {
 			try {
-				System.err.println(myIbis.identifier().name()+" Got elected Server");
+//				System.err.println(myIbis.identifier().name()+" Got elected Server");
 				initServer();
 			} catch (Exception e) {
 				e.printStackTrace();
@@ -548,7 +655,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		
 		//Connect client to sever
 		try {
-			if (!trumpPerson.equals(myIbis.identifier())) 
+//			if (!trumpPerson.equals(myIbis.identifier())) 
 				connectToServer(trumpPerson);
 			server = trumpPerson;
 		}catch (IOException e) {
@@ -574,7 +681,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 	private void connectToServer(IbisIdentifier target) throws IOException {
 		try {
 			if (clientSendPort == null) {
-				clientSendPort = myIbis.createSendPort(portTypeS, "SendPort: "+myIbis.identifier().name());
+				clientSendPort = myIbis.createSendPort(portTypeS);
 				
 			}else
 				clientSendPort.disconnect(server, serverName);;
@@ -598,7 +705,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 	@Override
 	public void joined(IbisIdentifier who) {
 		// TODO Auto-generated method stub
-		System.err.println("Pool joined: " + who.name());
+//		System.err.println("Pool joined: " + who.name());
 		if ((!who.equals(myIbis.identifier())) && iAmServer){
 
 		}
