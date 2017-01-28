@@ -15,6 +15,10 @@ public class Sokoban {
 	public static void main(String[] args) {
 		IkoPanLayer ipl = null;
 		String fileName = args[0];
+		boolean serverOnly;
+		serverOnly = false;
+		if (args.length > 1)
+			serverOnly = args[1].equals("serverOnly");
 		
 		try {
 			ipl = new IkoPanLayer();
@@ -29,7 +33,7 @@ public class Sokoban {
 			if (ipl.iAmServer) {
 				System.out.print("Bound now:");
 				long start = System.currentTimeMillis();
-				ipl.run();
+				ipl.run(serverOnly);
 				long end = System.currentTimeMillis();
 				System.err.println("Sokoban took " + (end - start) + " milliseconds");
 	//			Bound now: 1 2 3 4 5 6 7 8 9 10 11 12

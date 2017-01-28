@@ -24,6 +24,7 @@ public class Board {
 	int width; /* width of the board */
 	int bound;
 	int moves;
+	String movesMade = "";
 
 	public Board(String fileName) throws FileNotFoundException {
 		String[] board = loadBoard(fileName);
@@ -36,7 +37,7 @@ public class Board {
 	
 	@Override
 	public int hashCode() {
-		return (curBoard+playerX+":"+playerY+":"+moves).hashCode();
+		return (curBoard+movesMade).hashCode();
 	}
 	
 	@Override
@@ -52,10 +53,7 @@ public class Board {
 	        return false;
 	    }
 	    
-	    if (this.moves!=other.moves)
-	    	return false;
-	    
-	    if (this.playerX != other.playerX || this.playerY != other.playerY)
+	    if (!this.movesMade.equals(other.movesMade))
 	    	return false;
 	    
 	    
@@ -168,6 +166,7 @@ public class Board {
 		playerX += dx;
 		playerY += dy;
 		moves++;
+		movesMade += playerX + ":" + playerY + ":";
 		
 		return true;
 	}
@@ -187,7 +186,7 @@ public class Board {
 		playerX += dx;
 		playerY += dy;
 		moves++;
-		
+		movesMade += playerX + ":" + playerY + ":";
 		return true;
 	}
 	
