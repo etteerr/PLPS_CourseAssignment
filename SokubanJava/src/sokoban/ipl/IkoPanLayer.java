@@ -68,7 +68,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
     //is server
     boolean iAmServer = false;
     int shortest = Integer.MAX_VALUE;
-    private Object lockShortest;
+    private Object lockShortest = new Object();
     OneToManyHandler otmh;
     ReceivePort serverRecvPort;
     IbisIdentifier server;
@@ -696,11 +696,14 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 	
 
 	@Override
-	public synchronized void gotSignal(String signal, IbisIdentifier source) {
+	public void gotSignal(String signal, IbisIdentifier source) {
 		if (signal==null)
 			return;
 		
 		if (Integer.parseInt(signal)==0)
+			return;
+		
+		if (!source.equals(server))
 			return;
 		
 		synchronized(lockShortest) {
