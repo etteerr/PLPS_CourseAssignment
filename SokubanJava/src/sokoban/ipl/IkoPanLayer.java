@@ -697,6 +697,12 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 
 	@Override
 	public synchronized void gotSignal(String signal, IbisIdentifier source) {
+		if (signal==null)
+			return;
+		
+		if (Integer.parseInt(signal)==0)
+			return;
+		
 		synchronized(lockShortest) {
 			shortest = Integer.parseInt(signal);
 		}
