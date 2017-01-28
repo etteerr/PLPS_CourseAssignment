@@ -593,6 +593,7 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 				reply.writeString(boardRequestAnswer);
 				reply.writeInt(stepsPerNode);
 				b.fillMessage(reply);
+				//System.out.println("job given to: " + id.name());
 			}
 			//Send letter
 			reply.send();
