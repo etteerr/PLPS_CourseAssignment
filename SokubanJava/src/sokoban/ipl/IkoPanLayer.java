@@ -141,6 +141,8 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		}
 		
 		//General clean
+		myIbis.registry().disableEvents();
+		
 		try {
 			if (clientSendPort!=null)
 				clientSendPort.close();
