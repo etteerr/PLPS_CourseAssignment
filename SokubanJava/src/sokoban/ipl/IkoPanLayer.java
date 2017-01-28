@@ -708,6 +708,9 @@ public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
 		if (!source.equals(server))
 			return;
 		
+		if(lockShortest==null)
+			return;
+		
 		synchronized(lockShortest) {
 			shortest = Integer.parseInt(signal);
 		}
