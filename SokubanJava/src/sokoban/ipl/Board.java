@@ -4,6 +4,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
 
@@ -24,7 +25,8 @@ public class Board {
 	int width; /* width of the board */
 	int bound;
 	int moves;
-	String movesMade = "";
+	byte[] signature = new byte[128];
+	int sigiter = 0;
 
 	public Board(String fileName) throws FileNotFoundException {
 		String[] board = loadBoard(fileName);
@@ -35,29 +37,46 @@ public class Board {
 		init(board);
 	}
 	
+	
+	
+	/* (non-Javadoc)
+	 * @see java.lang.Object#hashCode()
+	 */
 	@Override
 	public int hashCode() {
-		return (curBoard+movesMade).hashCode();
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((curBoard == null) ? 0 : curBoard.hashCode());
+		result = prime * result + moves;
+		result = prime * result + sigiter;
+		result = prime * result + Arrays.hashCode(signature);
+		return result;
 	}
-	
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#equals(java.lang.Object)
+	 */
 	@Override
 	public boolean equals(Object obj) {
-	    if (obj == null) {
-	        return false;
-	    }
-	    if (!Board.class.isAssignableFrom(obj.getClass())) {
-	        return false;
-	    }
-	    final Board other = (Board) obj;
-	    if ((this.curBoard == null) ? (other.curBoard != null) : !this.curBoard.equals(other.curBoard)) {
-	        return false;
-	    }
-	    
-	    if (!this.movesMade.equals(other.movesMade))
-	    	return false;
-	    
-	    
-	    return true;
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		Board other = (Board) obj;
+		if (curBoard == null) {
+			if (other.curBoard != null)
+				return false;
+		} else if (!curBoard.equals(other.curBoard))
+			return false;
+		if (moves != other.moves)
+			return false;
+		if (sigiter != other.sigiter)
+			return false;
+		if (!Arrays.equals(signature, other.signature))
+			return false;
+		return true;
 	}
 	
 	public Board(ReadMessage reader) throws IOException {
@@ -68,6 +87,8 @@ public class Board {
 		moves = reader.readInt();
 		bound = reader.readInt();
 		width = reader.readInt();
+		reader.readArray(signature);
+		sigiter = reader.readInt();
 	}
 	
 	public void fillMessage(WriteMessage writer) throws IOException {
@@ -78,6 +99,8 @@ public class Board {
 		writer.writeInt(moves);
 		writer.writeInt(bound);
 		writer.writeInt(width);
+		writer.writeArray(signature);
+		writer.writeInt(sigiter);
 	}
 	
 	public void init(Board board) {
@@ -88,6 +111,8 @@ public class Board {
 		moves = board.moves;
 		bound = board.bound;
 		width = board.width;
+		signature = board.signature.clone();
+		sigiter = board.sigiter;
 	}
 	
 	/*
@@ -166,7 +191,6 @@ public class Board {
 		playerX += dx;
 		playerY += dy;
 		moves++;
-		movesMade += playerX + ":" + playerY + ":";
 		
 		return true;
 	}
@@ -186,7 +210,6 @@ public class Board {
 		playerX += dx;
 		playerY += dy;
 		moves++;
-		movesMade += playerX + ":" + playerY + ":";
 		return true;
 	}
 	
@@ -198,6 +221,12 @@ public class Board {
 		
 		for (int i = 0; i < DIRS.length; i++) {
 			Board child = cache.get(this);
+			child.signature[child.sigiter] = (byte) ( child.playerX%256);
+			child.sigiter++;
+			child.sigiter%=child.signature.length;
+			child.signature[child.sigiter] = (byte) ( child.playerY%256);
+			child.sigiter++;
+			child.sigiter%=child.signature.length;
 			int dx = DIRS[i][0];
 			int dy = DIRS[i][1];
 			

@@ -1,765 +1,501 @@
 package sokoban.ipl;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
-
+import ibis.ipl.ConnectionFailedException;
 import ibis.ipl.Ibis;
 import ibis.ipl.IbisCapabilities;
+import ibis.ipl.IbisCreationFailedException;
 import ibis.ipl.IbisFactory;
 import ibis.ipl.IbisIdentifier;
 import ibis.ipl.MessageUpcall;
 import ibis.ipl.PortType;
 import ibis.ipl.ReadMessage;
 import ibis.ipl.ReceivePort;
-import ibis.ipl.ReceiveTimedOutException;
-import ibis.ipl.RegistryEventHandler;
+import ibis.ipl.ReceivePortIdentifier;
 import ibis.ipl.SendPort;
 import ibis.ipl.WriteMessage;
 
-public class IkoPanLayer implements MessageUpcall, RegistryEventHandler {
-    
-    
-    private static final int stepsPerNode = 10; //Beyond 13 = GC overhead limit exceeded
+public class IkoPanLayer implements MessageUpcall {
 
-	PortType portTypeS = new PortType(
-    		PortType.COMMUNICATION_RELIABLE,
-            PortType.SERIALIZATION_DATA, 
-            PortType.RECEIVE_AUTO_UPCALLS,
-            PortType.CONNECTION_MANY_TO_ONE,
-            PortType.COMMUNICATION_FIFO
-            );
-    
-    PortType portTypeR = new PortType(
-    		PortType.COMMUNICATION_RELIABLE,
-            PortType.SERIALIZATION_DATA, 
-            PortType.RECEIVE_EXPLICIT,
-            PortType.RECEIVE_TIMEOUT,
-            PortType.CONNECTION_ONE_TO_MANY
-            );
+	private static final IbisCapabilities requiredCapabilities = new IbisCapabilities(IbisCapabilities.ELECTIONS_STRICT,
+			IbisCapabilities.MEMBERSHIP_TOTALLY_ORDERED, IbisCapabilities.SIGNALS);
 
-    IbisCapabilities ibisCapabilities = new IbisCapabilities(
-            IbisCapabilities.ELECTIONS_STRICT,
-            IbisCapabilities.TERMINATION,
-            IbisCapabilities.MEMBERSHIP_TOTALLY_ORDERED,
-            IbisCapabilities.SIGNALS
-            );
-    
-    //Port names
-    private static final String serverName = "server";
-    private static final String serverPort = "serverPort";
-    private static final String replyPort = "replyer";
-    
-    //Requests
-    private static final String boardRequestMessage = "BoardRequest";
-    private static final String boardRequestAnswer = "boardAnswer";
-	private static final String doneRequestAnswer = "done";
-	private static final String replyMessageFailedToSolve = "failed";
-	private static final String replyMessageSolutionFound = "Solution";
-	private static final String waitRequestAswer = "not ready";
-    
-    //Global ibis (local)
-    Ibis myIbis;
-    Board initialBoard;
-    boolean appRunning = true;
-    
-    //is server
-    boolean iAmServer = false;
-    int shortest = Integer.MAX_VALUE;
-    private Object lockShortest = new Object();
-    OneToManyHandler otmh;
-    ReceivePort serverRecvPort;
-    IbisIdentifier server;
-    BoardCache boardCache;
-    ArrayList<Board> jobs;
-    ArrayList<Board> jobsBusyOrDone;
-    private Object jobsLock = new Object();
-    private ArrayList<IbisIdentifier> boardRequests;
-    int bound = 0;
-    
-    //client data
-    int steps = 1;
-    SendPort clientSendPort;
-    ReceivePort clientRecvReplyPort;
-    ArrayList<Board> unsolvedBoards;
+	private static final PortType broadcastPort = new PortType(PortType.CONNECTION_MANY_TO_MANY,
+			PortType.RECEIVE_AUTO_UPCALLS, PortType.COMMUNICATION_RELIABLE, PortType.SERIALIZATION_DATA);
 
-	private ArrayList<Board> serverSolutions;
+	private static final PortType receivePort = new PortType(PortType.CONNECTION_MANY_TO_ONE,
+			PortType.RECEIVE_AUTO_UPCALLS, PortType.COMMUNICATION_RELIABLE, PortType.CONNECTION_DIRECT,
+			PortType.SERIALIZATION_DATA);
 
+	private static final PortType sendPort = new PortType(PortType.CONNECTION_ONE_TO_ONE,
+			PortType.COMMUNICATION_RELIABLE, PortType.CONNECTION_DIRECT, PortType.SERIALIZATION_DATA);
+
+	private static final int jobRequestTreshold = 40;
+
+	private static final int jobRequestMaxReply = 5000;
+
+	// Objects
+	private IkoPanJobs jobs; // Stores all jobs
+	private Ibis myIbis;
+	private HashSet<Board> solutions;
+
+	// Ports
+	private ReceivePort broadcastReceive;
+
+	private ReceivePort otmReceive;
+
+	private SendPort otoSend;
+
+	private SendPort broadcastSend;
+
+	// The original, the loader of worlds
+	private IbisIdentifier harbinger;
+
+	private HashSet<IbisIdentifier> connectedTo;
+
+	private boolean systemRunning;
+
+	private BoardCache bc;
+
+	// bcast reply expectator
+	int bcastRepliesExpected = 0;
 	
+	//Final solution count
+	int finalSolutionCount = 0;
 
-    
 	/**
-	 * Constructor
-	 * 	Handles the election of a server.
-	 * 	Handles creation of a ibis
-	 * 	Handles registering
+	 * Specifies request type by byte
+	 * 	Limited to 8 types to add redundancy (only 1 bit may be 1)
+	 * 	This to reduce the possibility of request corruption
+	 * @author erwin
+	 *
 	 */
-	IkoPanLayer() throws Exception {
-		//Create cache
-		boardCache = new BoardCache();
-		
-		//Create ibis
-		myIbis = IbisFactory.createIbis(ibisCapabilities, this, portTypeS, portTypeR);
-		
-		//Register for events
-		myIbis.registry().enableEvents();
-		
-		//Elect a server (so, new clients can be added dynamically)
-		myIbis.registry().elect(serverName);
-		
-		//Wait for election (happens through events)
-		while(server==null)
-			Thread.sleep(100);
-		
-		//Initialize client if we are not a server
-		//if (!server.equals(myIbis.identifier())) 
-			initClient();
+	class MessageTypes {
+		public static final byte jobRequest = 2^0;
+		//public static final byte newShortest = 2^1; //Not used (these are signals)
+		public static final byte gather = 2^2;
+		public static final byte gatherReply = 2^3;
+		public static final byte jobRequestReply = 2^4;
 	}
-	
-	void shutdown() {
-		myIbis.registry().disableEvents();
-		if (iAmServer) {
-			try {
-				jobs = new ArrayList<Board>();//Make jobs empty
-				runServerStep(); //handle final requests
-				serverRecvPort.disableConnections();
-				serverRecvPort.disableMessageUpcalls();
-				serverRecvPort.close(1000);
-			} catch (IOException e) {
-	
-			}
-			
-			otmh.disconnectAll();
-			
-			try {
-				myIbis.registry().terminate();
-			} catch (IOException e) {
-	
-			}
-		}
-		
-		//General clean
-		
+
+	/**
+	 * Initializes the IkoPanLayer Starts a ibis instance Votes for the right to
+	 * start Initializes board
+	 *
+	 * @param fileName
+	 *            Path to a board file
+	 * @throws IbisCreationFailedException
+	 *             Ibis creation failed
+	 * @throws IOException
+	 *             election failed
+	 * @throws FileNotFoundException
+	 *             board not found
+	 */
+	public IkoPanLayer(String fileName) throws IbisCreationFailedException, IOException, FileNotFoundException {
+		myIbis = IbisFactory.createIbis(requiredCapabilities, // Capabilities
+				null, // Registry handler
+				broadcastPort, sendPort, receivePort); // Ports
+
+		// Initialize ports
+		broadcastReceive = myIbis.createReceivePort(broadcastPort, "bcast", this);
+		broadcastReceive.enableConnections();
+		broadcastSend = myIbis.createSendPort(broadcastPort, "bcast" + myIbis.identifier().name());
+		otmReceive = myIbis.createReceivePort(receivePort, "recv" + myIbis.identifier().name(), this);
+		otoSend = myIbis.createSendPort(sendPort, "send" + myIbis.identifier().name());
+
+		// Enable downcalls
+
+		// Select the one to load the board and start the process
 		try {
-			if (clientSendPort!=null)
-				clientSendPort.close();
+			harbinger = myIbis.registry().elect("harbinger");
 		} catch (IOException e) {
-	
+			myIbis.end();
+			throw e;
 		}
+
+		// Initialize jobs & solutions
+		bc = new BoardCache();
+		jobs = new IkoPanJobs(bc);
+		solutions = new HashSet<Board>();
+
+		// Init variables
+		connectedTo = new HashSet<IbisIdentifier>();
+
+		// “We are superior.” ~Harbinger
+		if (!harbinger.equals(myIbis.identifier()))
+			return;
+
+		// “I am Harbinger.” ~Harbinger
+		Board b = new Board(fileName); // throws FileNotFound
+
+		// Add job
+		jobs.add(b);
+	}
+
+	public int getIbisCount() {
+		return myIbis.registry().joinedIbises().length
+				- (myIbis.registry().diedIbises().length + myIbis.registry().leftIbises().length);
+	}
+
+	public void run() {
+		// Connecto to ibises
+		connectToAllIbises();
+		// Init run
+		systemRunning = true;
+
+		while (systemRunning) {
+			jobStep();
+			updateBoundLimit();
+		}
+	}
+
+	private void updateBoundLimit() {
+		String[] a = myIbis.registry().receivedSignals();
+		for (String i : a)
+			handleSignal(i);
+	}
+
+	private void connectToAllIbises() {
+
+		for (IbisIdentifier i : myIbis.registry().joinedIbises()) {
+			if (!connectedTo.contains(i) && !i.equals(myIbis.identifier())) {
+				try {
+					broadcastSend.connect(i, "bsend" + myIbis.identifier().name());
+					connectedTo.add(i);
+				} catch (ConnectionFailedException e) {
+					try {
+						myIbis.registry().assumeDead(i);
+					} catch (IOException e1) {
+						e.printStackTrace();
+					}
+				}
+			}
+		}
+
+	}
+
+	private void jobStep() {
+		if (jobs.getnJobs() < jobRequestTreshold) {
+			requestJobs();
+		}
+
+		Board b = jobs.get();
+
+		if (b == null) {
+			//while we are still waiting for jobs and jobs.get == null, sleep to release lock in jobs
+			while(bcastRepliesExpected > 0 && (b=jobs.get())==null)
+				try { Thread.sleep(50); } catch (InterruptedException e) {};
+				
+			if (b == null) {
+				requestGather();
+				while (bcastRepliesExpected > 0 );
+				countOwnSolutions(jobs.getBoundLimit());
+				systemRunning = false;
+				return;
+			}
+			
+		}
+
+		java.util.List<Board> l = b.generateChildren(bc);
+
+		// Sort solved and jobs
+		for (Board i : l) {
+			if (i.isSolved()) {
+				solutions.add(i);
+				bcastShortest(i.moves);
+				jobs.setBoundLimit(i.moves);
+			} else
+				jobs.add(i);
+		}
+		
+		if (b.isSolved()) {
+			solutions.add(b);
+			bcastShortest(b.moves);
+			jobs.setBoundLimit(b.moves);
+		}else
+			bc.put(b);
+	}
+
+	private int countOwnSolutions(int boundLimit) {
+		int isolut = 0;
+		for (Board i : solutions)
+			if (i.moves==boundLimit)
+				isolut++;
+		
+		return isolut;
+		
+	}
+
+	private void requestGather() {
+		while (bcastRepliesExpected > 0);
+
+		try {
+			WriteMessage msg = broadcastSend.newMessage();
+			msg.writeInt(MessageTypes.gather);
+			msg.writeInt(jobs.getBoundLimit());
+			msg.writeObject(otmReceive.identifier());
+			msg.finish();
+			bcastRepliesExpected = broadcastSend.connectedTo().length;
+		} catch (IOException e) {
+		}
+	}
+
+	/**
+	 * bcasts message containing
+	 * 	-message type
+	 * 	-ReceivePortIdentifier
+	 */
+	private void requestJobs() {
+		if (bcastRepliesExpected > 0)
+			return;
+		
+		connectToAllIbises();
+		
+		if (connectedTo.isEmpty())
+			return;
 		
 		try {
-			if(clientRecvReplyPort!=null)
-				clientRecvReplyPort.close(1000);
-		} catch (IOException e1) {
+			WriteMessage msg = broadcastSend.newMessage();
+			msg.writeInt(MessageTypes.jobRequest);
+			msg.writeObject(otmReceive.identifier());
+			msg.finish();
+			bcastRepliesExpected = broadcastSend.connectedTo().length;
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+
 	
+	private void bcastShortest(int moves) {
+		for (IbisIdentifier i : connectedTo)
+			try {
+				myIbis.registry().signal(Integer.toString(moves), i);
+			} catch (IOException e) {
+			}
+	}
+
+	@Override
+	/**
+	 * @param msg
+	 * 	msg expects ateast:
+	 * 		- Byte indicating MessageType
+	 * 		- data corresponding to messageType
+	 */
+	public void upcall(ReadMessage msg) throws IOException, ClassNotFoundException {
+		byte type = msg.readByte();
+		
+		switch(type) {
+			case MessageTypes.jobRequest:
+				handleJobRequest(msg);
+				msg.finish();
+				break;
+			case MessageTypes.gather:
+				handleGatherRequest(msg);
+				msg.finish();
+				break;
+			case MessageTypes.gatherReply:
+				handleGatherReply(msg);
+				bcastRepliesExpected--;
+				msg.finish();
+				break;
+			case MessageTypes.jobRequestReply:
+				handeJobRequestReply(msg);
+				bcastRepliesExpected--;
+				msg.finish();
+				break;
+				
+			default:
+				//Wut?
+		}
+	}
+
+	/**
+	 * 
+	 * @param msg
+	 * msg should contain:
+	 * - number of jobs send (n)
+	 * - n Boards
+	 * 
+	 * synchronized is already in jobs object
+	 */
+	private void handeJobRequestReply(ReadMessage msg) {
+		try {
+			int jobsReplied = msg.readInt();
+			Board b;
+			for (int i = 0; i < jobsReplied; i++) {
+				b = new Board(msg);
+				jobs.add(b);
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 		
-		//Close ibis
+	}
+
+	/**
+	 * 
+	 * @param msg Only one int containing the solution count
+	 */
+	private synchronized void handleGatherReply(ReadMessage msg) {
+		try {
+			finalSolutionCount += msg.readInt();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		
+	}
+
+	/**
+	 * Expects msg with:
+	 *  -Int: givenBound
+	 * 	-ReceiverPortIdentifier
+	 * @param msg
+	 * 
+	 * writes reply with:
+	 * 	- Message type
+	 *  - int Solutions
+	 */
+	private synchronized void handleGatherRequest(ReadMessage msg) {
+		//we finish all our current jobs (wait for)
+		while (jobs.hasJobs()>0)
+			try { Thread.sleep(100); } catch (InterruptedException e) {};
+			
+			
+		ReceivePortIdentifier id = null;
+		try {
+			//Setup message
+			int givenBound = msg.readInt();
+			id = (ReceivePortIdentifier) msg.readObject();
+			otoSend.connect(id);
+			WriteMessage reply = otoSend.newMessage();
+			reply.writeByte(MessageTypes.gatherReply);
+			
+			//Count solutions
+			int isolut = countOwnSolutions(givenBound);
+			//Pack and send
+			reply.writeInt(isolut);
+			reply.send();
+			reply.finish();
+		} catch (ClassNotFoundException | IOException e) {
+			e.printStackTrace();
+		} finally {
+			try {
+				otoSend.disconnect(id);
+			} catch (IOException e) {}
+		}
+		
+		//Shut down system
+		systemRunning = false;
+	}
+
+	/**
+	 * sends a message with jobs (or none)
+	 * Message:
+	 * 	-message type
+	 * 	-number of boards sending
+	 * 	-Boards[number of boards]
+	 * @param msg
+	 * msg expects:
+	 * 	-ReceivePortIdentifier
+	 */
+	private synchronized void handleJobRequest(ReadMessage msg) {
+		//Determine jobs
+		int hasJobs = jobs.hasJobs();
+		
+		int nsend = hasJobs - jobRequestTreshold;
+		
+		if (nsend > jobRequestMaxReply)
+			nsend = jobRequestMaxReply;
+		else if (nsend < 0)
+			nsend = 0;
+		
+		WriteMessage reply = null;
+		ReceivePortIdentifier id = null;
+		try {
+			id = (ReceivePortIdentifier) msg.readObject();
+		} catch (ClassNotFoundException | IOException e1) {
+			e1.printStackTrace();
+			return;
+		}
+		
+		// Connect and create message
+		try {
+			otoSend.connect(id);
+			reply = otoSend.newMessage();
+			reply.writeByte(MessageTypes.jobRequestReply);
+		}catch (IOException e) {
+			return;
+		}
+		
+		//Fill message with boards
+		// Keep track of taken jobs, if something failes, add them back to jobs
+		ArrayList<Board> sendJobs = new ArrayList<Board>();
+		try {
+			reply.writeInt(nsend);
+			for (int i = 0; i < nsend; i++) {
+				Board b = jobs.get();
+				sendJobs.add(b);
+				b.fillMessage(reply);
+			}
+			reply.send();
+			reply.finish();
+		}catch (IOException e) {
+			//REstore jobs!
+			for (Board i : sendJobs)
+				jobs.add(i);
+		}finally {
+			try {
+				otoSend.disconnect(id);
+			} catch (IOException e) {}
+		}
+	}
+
+	public void handleSignal(String msg) {
+		if (msg == null)
+			return;
+
+		int i = 0;
+		try {
+			i = Integer.parseInt(msg);
+		} catch (NumberFormatException e) {
+			return;
+		}
+
+		if (i <= 0)
+			return;
+
+		if (jobs.getBoundLimit() > i)
+			jobs.setBoundLimit(i);
+	}
+
+	private void endIbis() {
+		try {
+			broadcastReceive.close(1000);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		try {
+			otmReceive.close(1000);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+		try {
+			otoSend.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		try {
 			myIbis.end();
 		} catch (IOException e) {
-	
-		}
-	}
-	
-	public ArrayList<Board> getSolutions() {
-		return serverSolutions;
-	}
-
-	private void initClient() throws IOException {		
-		//If we become the server, make sure everyone exits
-		jobs = new ArrayList<Board>();
-		
-		//Open a port for replies
-		clientRecvReplyPort = myIbis.createReceivePort(portTypeR, replyPort);
-		clientRecvReplyPort.enableConnections();
-		
-		//Init array
-		unsolvedBoards = new ArrayList<Board>();
-	}
-
-	private void initServer() throws Exception {
-		if (iAmServer)
-			return;
-		//myIbis.registry().disableEvents(); //<-- causes hang
-		
-		iAmServer = true;
-		server = myIbis.identifier();
-		boardRequests = new ArrayList<IbisIdentifier>();
-		serverRecvPort = myIbis.createReceivePort(portTypeS, serverPort, this);
-		serverRecvPort.enableConnections();
-		serverRecvPort.enableMessageUpcalls();
-		SendPort serverReplyPort = myIbis.createSendPort(portTypeR);
-		otmh = new OneToManyHandler(serverReplyPort, replyPort);
-		serverSolutions = new ArrayList<Board>();
-		
-		//Enable registry (to allow for newly joined ibises)
-		//myIbis.registry().enableEvents(); //<-- causes events to hang
-	}
-
-	public void initJobs(Board initBoard) throws InterruptedException {
-		//System.out.println("initJobs: "+iAmServer);
-		if (!iAmServer) {
-			return;
-		}
-		
-		initialBoard = new Board(initBoard);
-	
-		//Generate jobs
-		synchronized(jobsLock){
-			jobs = new ArrayList<Board>();
-			jobsBusyOrDone = new ArrayList<Board>();
-			
-			ArrayList<Board> boards = (ArrayList<Board>) initBoard.generateChildren(boardCache);
-			for(Board b : boards) {
-				jobs.addAll(b.generateChildren(boardCache));
-			}
-		}
-		
-		//Initial board output
-		System.out.println("Running Sokoban, initial board:");
-		System.out.println(initBoard.toString());
-	}
-	
-	public void run() {
-		run(false);
-	}
-	
-	public void run(boolean serverOnly){
-		appRunning = true;
-		if (!(iAmServer && serverOnly))
-			new Thread(new Runnable() {
-			    public void run() {
-			    	while(appRunning && !myIbis.registry().hasTerminated() ){
-			    		runClientStep();
-			    	}
-			    }
-			}).start();
-		while(appRunning && !myIbis.registry().hasTerminated() ) {
-			if (iAmServer) 
-				runServerStep();
-			else
-				try {
-					Thread.sleep(1000);
-				} catch (InterruptedException e) {
-				}
-				
-		}
-	}
-	
-	private void runClientStep(){
-		//CHeck connection
-		//System.out.println(clientSendPort.lostConnections());
-		
-		//Request board
-		try {
-			requestBoard();
-		} catch (Exception e) {
-			System.err.println("Error while requesting board: "+e.getMessage());
 			e.printStackTrace();
-			return;
-		}
-		
-		//Get answer
-		Board b = getRequestedBoardReply();
-		
-		
-		//Process board
-		ArrayList<Board> sols = processBoard(b);
-		
-		//Send the result
-		//If b is solved, send b. If not, send global unsolved
-		sendBoardReply(sols);
-	}
-	
-	private void sendBoardReply(ArrayList<Board> solutions) {
-		
-		if (solutions == null || unsolvedBoards==null)
-			return;
-		
-		if (unsolvedBoards.isEmpty() && solutions.isEmpty())
-			return;
-		
-		HashSet<Board> replyBoards = new HashSet<Board>();
-		replyBoards.addAll(unsolvedBoards);
-		unsolvedBoards.clear();
-		
-		//Report
-		try {
-			WriteMessage boardFinished = clientSendPort.newMessage();
-			
-			if (!solutions.isEmpty()) {
-//				System.out.println("Sending "+solutions.size()+" solutions" + " and "+replyBoards.size()+" boards.");
-				boardFinished.writeString(replyMessageSolutionFound);
-				boardFinished.writeLong(solutions.size());
-				for(Board b : solutions)
-					b.fillMessage(boardFinished);
-//				boardFinished.writeLong(replyBoards.size());
-//				for (Board b : replyBoards) {
-//					b.fillMessage(boardFinished);
-//				}
-			}else{
-//				System.out.println("Sending "+replyBoards.size()+" boards.");
-				boardFinished.writeString(replyMessageFailedToSolve);
-				boardFinished.writeLong(replyBoards.size());
-				for (Board b : replyBoards) {
-					b.fillMessage(boardFinished);
-				}
-				//ourBoard.fillMessage(boardFinished);
-			}
-			//Send message
-			boardFinished.send();
-			boardFinished.flush();
-			boardFinished.finish();
-			
-		}catch (IOException e) {
-			System.err.println("Error while reporting boards to server");
-			System.err.println(e.getMessage());
-		}
-		
-	}
-
-	private void runServerStep() {
-		//Check recv connection
-		serverRecvPort.toString();
-		
-		synchronized(boardRequests) {
-			for(IbisIdentifier id : boardRequests) {
-				handleBoardRequest(id);
-			}
-			boardRequests.clear();
-		}
-		
-	}
-
-	private ArrayList<Board> processBoard(Board recvBoard) {
-		if (recvBoard==null)
-			//Nothing to to
-			return null;
-		
-		//Init board array
-		unsolvedBoards.clear();
-		unsolvedBoards.add(recvBoard);
-		
-//		System.out.println("Solving board...");
-		
-		//Init temp board array
-		ArrayList<Board> tmp = new ArrayList<Board>();
-		ArrayList<Board> solutions = new ArrayList<Board>();
-		
-		
-		if (recvBoard.isSolved()){
-			solutions.add(recvBoard);
-			return solutions;
-		}
-		//From bound to bound
-		int from = recvBoard.getMoves();
-		int to = recvBoard.getMoves()+steps;
-		
-		//For determined steps, keep solving all boards
-		for (int i = from; i < to; i++) {
-			for (Board b : unsolvedBoards) {				
-				//if solved, store
-				if (b.isSolved()) {
-					if (b.getMoves() <= shortest){
-						solutions.add(b);
-						if (b.getMoves() < shortest)
-							shortest = b.getMoves();
-					}
-				}else {
-					//And prune
-					if (b.getMoves() < shortest)
-						//Step 1
-						if (b.getMoves() > i)
-							tmp.add(b); //On the bound or out of bound
-						else
-							tmp.addAll(b.generateChildren(boardCache));
-				}
-				
-			}
-//			System.out.println("Boards: " + tmp.size() + "\tSolutions: "+solutions.size() + "\tdepth: "+i);
-			unsolvedBoards.clear();
-			unsolvedBoards.addAll(tmp);
-			tmp.clear();
-			
-			if (unsolvedBoards.isEmpty())
-				break;
-		}
-		
-		return solutions;
-		
-	}
-
-	private Board getRequestedBoardReply() {
-		ReadMessage reply;
-		String cmd = "err";
-		
-		//Get reply message
-		try{
-			// set timeout
-			reply = clientRecvReplyPort.receive(5000);
-			cmd = reply.readString();
-		}catch (ReceiveTimedOutException e) {
-			reply = null;
-			System.err.println("Request timeout");
-			return null;
-		} catch (IOException e) {
-			System.err.println(e.getMessage());
-			return null;
-		}
-		
-		//Check if we are done
-		if (cmd.equals(doneRequestAnswer)) {
-			appRunning = false;
-			try {
-				System.err.println("Done message received");
-				reply.finish();
-				clientSendPort.disconnect(server, serverPort);
-				clientSendPort.close();
-			} catch (IOException e) {
-				//e.printStackTrace();
-			}
-			return null;
-		}
-		
-		//Check if its our board
-		if (cmd.equals(boardRequestAnswer)) {
-			Board b;
-			try {
-				//Set steps
-				steps = reply.readInt();
-				//Recv boad
-				b = new Board(reply);
-				//Finish reply
-				reply.finish();
-				//return our board
-				return b;
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			} 
-		}
-		
-		if (reply!=null)
-			try {
-				reply.finish();
-				Thread.sleep(500);
-			} catch (IOException | InterruptedException e) {
-				System.err.println("Error with reply:");
-				System.err.println(e.getMessage());
-			}
-		
-		return null;
-		
-	}
-
-	private void requestBoard() throws IOException {
-		if (!appRunning)
-			return;
-		WriteMessage boardRequest;
-		boardRequest = clientSendPort.newMessage();
-		boardRequest.writeString(boardRequestMessage);
-		boardRequest.send();
-		try{
-			boardRequest.finish();
-		}catch (IOException e) {
-			boardRequest.reset();
-			boardRequest.finish();
-			throw e;
 		}
 	}
 
-	public void waitForEnd() throws IOException {
-		myIbis.registry().waitUntilTerminated();
-		shutdown();
-	}
-	
-	
-	private Board selectBoard(int maxMoves) {
-		//System.out.println("Selecting job... Jobs: " + jobs.size() + "\tSolutions: " + serverSolutions.size());
-		if (jobs == null)
-			return null;
-		
-		if (jobs.isEmpty() && serverSolutions.isEmpty())
-			return null;
-		
-		Board selected = null;
-		
-		ArrayList<Board> toBePruned = new ArrayList<Board>();
-		
-		synchronized(jobsLock){
-			outerloop:
-			while(true){
-				for (Board b : jobs) {
-					if (b.getMoves() < bound) {
-						selected = b;
-						break outerloop;
-					}
-					//Prune
-					if (b.getMoves() > shortest)
-						toBePruned.add(b);
-				}
-			if (bound < shortest){	
-				bound++;
-				System.out.print(" "+bound);
-			}else
-				return null;
-			}
-			//prune
-			jobs.removeAll(toBePruned);
-			jobsBusyOrDone.add(selected); //Keep a record of send jobs. If jobs is empty without a solution, network has failed somewhere
-			jobs.remove(selected);
-			
-		} //Release lock
-		
-		return selected;
-	}
-	
-//	private synchronized void pruneJobs(int moves) {
-//		HashSet<Board> toBePruned = new HashSet<Board>();
-//		
-//		synchronized(jobsLock){
-//			//prune
-//			for (Board b : jobs) {
-//				//Prune
-//				if (b.getMoves() > moves)
-//					toBePruned.add(b);
-//			}
-////			System.out.println("Pruned " + toBePruned.size() + " jobs.");
-//			jobs.removeAll(toBePruned);
-//			
-//		} //Release lock
-//	}
-
-	@Override
-	public void upcall(ReadMessage msg) throws IOException, ClassNotFoundException {
-		//Server handles requests
-//		System.out.println("From "+msg.origin().name());
-		String req = msg.readString();
-//		System.out.println("Request: "+req);
-//		System.err.println("Message size : " + msg.remaining());
-		
-		if (req.equals(boardRequestMessage))
-		{
-			planBoardRequestHandle(msg);
-			msg.finish();
-			
-		}else if (req.equals(replyMessageSolutionFound)) {
-			//Solution found
-			//Prune all boards
-			//appRunning = false;
-			long sols = msg.readLong();
-//			System.out.println("\n"+sols+" new solutions given.");
-			for(int i = 0; i < sols; i++){
-				Board b = new Board(msg);
-				if (b.isSolved())
-					if (b.moves < shortest)
-						shortest = b.moves;
-				serverSolutions.add(b);
-			}
-			if (bound > shortest)
-				bound = shortest;
-//			System.out.println("we have "+serverSolutions.size() + " solutions. (shortest: "+shortest+")");
-//			System.out.println(jobs.size()+" jobs left");
-			//addJobs(msg);
-			msg.finish(); //Locks shortests in upCall
-			//Send limiter
-			for (IbisIdentifier i : otmh.getReceivePortIdentifiers()) {
-				myIbis.registry().signal(""+shortest, i);
-			}
-			//remove print statements
-//			System.out.println("Solution!");
-			//System.out.println(b.toString());
-			
-		}else if (req.equals(replyMessageFailedToSolve)) {
-			addJobs(msg);
-			msg.finish();
-		}
-		
-		//TODO remove print statements
-//		if (jobs!=null)
-//			System.out.println("Jobs: " + jobs.size());
-//		else
-//			System.out.println("no jobs");
-	}
-	
-	private void planBoardRequestHandle(ReadMessage msg) {
-		IbisIdentifier id = msg.origin().ibisIdentifier();
-		synchronized(boardRequests) {
-			boardRequests.add(id);
-		}
+	public void exit() {
+		endIbis();
 	}
 
-	private void handleBoardRequest(IbisIdentifier id) {
-		try {
-			Board b;
-			WriteMessage reply = otmh.getNewMessage(id);
-			
-			//If jobs is not initialized, let the slaves wait
-			if (jobs == null) 
-				reply.writeString(waitRequestAswer);
-			//If jobs is empty, we are done
-			else if ((b=selectBoard(bound))==null) 
-				if (!serverSolutions.isEmpty()) {
-					reply.writeString(doneRequestAnswer);
-					appRunning = false;
-				}
-				else
-					reply.writeString(waitRequestAswer);
-			//write a formal letter
-			else {
-				reply.writeString(boardRequestAnswer);
-				reply.writeInt(stepsPerNode);
-				b.fillMessage(reply);
-				//System.out.println("job given to: " + id.name());
-			}
-			//Send letter
-			reply.send();
-			reply.finish();
-
-		}catch (Exception e) {
-			//e.printStackTrace();
-			System.err.println("Error while handling request: "+e.getMessage());
-			//e.printStackTrace();
-		}
-		
-	}
-
-	private void addJobs(ReadMessage msg) throws IOException {
-		long im = msg.readLong();
-		synchronized(jobsLock){
-			for (long i = 0; i < im; i++) {
-				Board b = new Board(msg);
-				//Prune
-				if (b.getMoves() <= shortest)
-					jobs.add(b);
-			}
-		}
-	}
-
-	
-	@Override
-	public void died(IbisIdentifier dogTag) {
-		if (dogTag.equals(server)) {
-			//Reelect a server
-			try {
-				myIbis.registry().elect(serverName);
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-		
-		otmh.disconnect(dogTag);
-	}
-
-	@Override
-	public void electionResult(String electionName, IbisIdentifier trumpPerson) {
-		//If election is not for sever.... than we ignore election
-		if (!electionName.equals( serverName))
-			return;
-		
-		//Initialize correct ports if we are server
-		if (trumpPerson.equals(myIbis.identifier())) {
-			try {
-//				System.err.println(myIbis.identifier().name()+" Got elected Server");
-				initServer();
-			} catch (Exception e) {
-				e.printStackTrace();
-				return;
-			}
-		}
-		
-		//Connect client to sever
-		try {
-//			if (!trumpPerson.equals(myIbis.identifier())) 
-				connectToServer(trumpPerson);
-			server = trumpPerson;
-		}catch (IOException e) {
-			//Could not connect
-			//Make dead assumption
-			System.err.println("Assuming dead server");
-			try {
-				myIbis.registry().assumeDead(trumpPerson);
-				Thread.sleep(100);
-				myIbis.registry().elect(serverName);
-				return;
-			} catch (IOException e1) {
-				// TODO Auto-generated catch block
-				System.err.println(e1.getMessage());
-			} catch (InterruptedException e1) {
-				System.err.println("sleep error");
-			}
-		}
-		
-		
-	}
-
-	private void connectToServer(IbisIdentifier target) throws IOException {
-		try {
-			if (clientSendPort == null) {
-				clientSendPort = myIbis.createSendPort(portTypeS);
-				
-			}else
-				clientSendPort.disconnect(server, serverName);;
-		} catch (IOException e1) {
-			//Nothing to do, not a biggy
-			//clientSendPort = null;
-		}
-		
-		clientSendPort.connect(target, serverPort);
-
-	}
-	
-
-	@Override
-	public void gotSignal(String signal, IbisIdentifier source) {
-		if (signal==null)
-			return;
-		
-		if (Integer.parseInt(signal)==0)
-			return;
-		
-		if (!source.equals(server))
-			return;
-		
-		if(lockShortest==null)
-			return;
-		
-		synchronized(lockShortest) {
-			shortest = Integer.parseInt(signal);
-		}
-	}
-
-	@Override
-	public void joined(IbisIdentifier who) {
-		// TODO Auto-generated method stub
-//		System.err.println("Pool joined: " + who.name());
-		if ((!who.equals(myIbis.identifier())) && iAmServer){
-
-		}
-	}
-
-	@Override
-	public void left(IbisIdentifier who) {
-		if (who.equals(server)) {
-			//Server shutdown (not crash)
-			
-		}else if (iAmServer) {
-			otmh.disconnect(who);
-		}
-		
-	}
-
-	@Override
-	public void poolClosed() {
-		// TODO Auto-generated method stub
-		
-	}
-
-	@Override
-	public void poolTerminated(IbisIdentifier arg0) {
-		// TODO Auto-generated method stub
-		
-	}
 }

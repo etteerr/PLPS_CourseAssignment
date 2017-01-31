@@ -1,6 +1,7 @@
 package sokoban.sequential;
 
 import java.io.FileNotFoundException;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -40,6 +41,7 @@ public class Sokoban {
 
 		if(board.isSolved()) {
 			//System.out.print(board.toString());
+			//System.out.println(Arrays.toString(board.signature));
 			return 1;
 		}
 

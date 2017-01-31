@@ -92,11 +92,13 @@ int main(int nargs, char **args) {
 	else gameoflife.getAlive();
 
 	//Print duration
-	if (gameoflife.getWorldRank()==0) fprintf(stderr,"Computing time: %.5f\n", duration);
+	if (gameoflife.getWorldRank()==0) fprintf(stderr,"Game of Life took %10.3f seconds\n", duration);
 
 	//printf("Node %i: Exited.\n", gameoflife.getWorldRank());
 
 	if (gameoflife.getWorldRank()==0 && gameoflife.getWorldSize() > 1 && !sanityRun) printProfiling();
+	if (gameoflife.getWorldRank()==0 && !sanityRun) printf("Game of Life took %10.3f seconds\n", duration);
+
 
 	return gameoflife.getStatus();
 }

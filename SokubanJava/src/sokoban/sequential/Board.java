@@ -2,14 +2,20 @@ package sokoban.sequential;
 
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
+
+import ibis.ipl.ReadMessage;
+import ibis.ipl.WriteMessage;
 
 /**
  * Class representing a particular state of the Sokoban board.
  */
 public class Board {
+
 	/* directions in which the player can move */
 	static int[][] DIRS = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };
 
@@ -19,6 +25,8 @@ public class Board {
 	int width; /* width of the board */
 	int bound;
 	int moves;
+	int[] signature = new int[64];
+	int sigiter = 0;
 
 	public Board(String fileName) throws FileNotFoundException {
 		String[] board = loadBoard(fileName);
@@ -29,6 +37,69 @@ public class Board {
 		init(board);
 	}
 	
+	
+	
+	/* (non-Javadoc)
+	 * @see java.lang.Object#hashCode()
+	 */
+	@Override
+	public int hashCode() {
+		final int prime = 31;
+		int result = 1;
+		result = prime * result + ((curBoard == null) ? 0 : curBoard.hashCode());
+		result = prime * result + moves;
+		result = prime * result + Arrays.hashCode(signature);
+		return result;
+	}
+
+	/* (non-Javadoc)
+	 * @see java.lang.Object#equals(java.lang.Object)
+	 */
+	@Override
+	public boolean equals(Object obj) {
+		if (this == obj)
+			return true;
+		if (obj == null)
+			return false;
+		if (getClass() != obj.getClass())
+			return false;
+		Board other = (Board) obj;
+		if (curBoard == null) {
+			if (other.curBoard != null)
+				return false;
+		} else if (!curBoard.equals(other.curBoard))
+			return false;
+		if (moves != other.moves)
+			return false;
+		if (!Arrays.equals(signature, other.signature))
+			return false;
+		return true;
+	}
+	
+	public Board(ReadMessage reader) throws IOException {
+		curBoard = reader.readString();
+		playerX = reader.readInt();
+		playerY = reader.readInt();
+		destBoard = reader.readString();
+		moves = reader.readInt();
+		bound = reader.readInt();
+		width = reader.readInt();
+		reader.readArray(signature);
+		sigiter = reader.readInt();
+	}
+	
+	public void fillMessage(WriteMessage writer) throws IOException {
+		writer.writeString(curBoard);
+		writer.writeInt(playerX);
+		writer.writeInt(playerY);
+		writer.writeString(destBoard);
+		writer.writeInt(moves);
+		writer.writeInt(bound);
+		writer.writeInt(width);
+		writer.writeArray(signature);
+		writer.writeInt(sigiter);
+	}
+	
 	public void init(Board board) {
 		curBoard = board.curBoard;
 		playerX = board.playerX;
@@ -37,6 +108,8 @@ public class Board {
 		moves = board.moves;
 		bound = board.bound;
 		width = board.width;
+		signature = board.signature;
+		sigiter = board.sigiter;
 	}
 	
 	/*
@@ -134,7 +207,6 @@ public class Board {
 		playerX += dx;
 		playerY += dy;
 		moves++;
-		
 		return true;
 	}
 	
@@ -146,6 +218,12 @@ public class Board {
 		
 		for (int i = 0; i < DIRS.length; i++) {
 			Board child = cache.get(this);
+			child.signature[child.sigiter] = child.playerX;
+			child.sigiter++;
+			child.sigiter%=child.signature.length;
+			child.signature[child.sigiter] = child.playerY;
+			child.sigiter++;
+			child.sigiter%=child.signature.length;
 			int dx = DIRS[i][0];
 			int dy = DIRS[i][1];
 			
@@ -194,4 +272,40 @@ public class Board {
 	public void setMoves(int moves) {
 		this.moves = moves;
 	}
+
+//	@Override
+//	public void generated_DefaultReadObject(IbisSerializationInputStream reader, int lvl)
+//			throws IOException, ClassNotFoundException {
+//		curBoard = reader.readString();
+//		playerX = reader.readInt();
+//		playerY = reader.readInt();
+//		destBoard = reader.readString();
+//		moves = reader.readInt();
+//		bound = reader.readInt();
+//		width = reader.readInt();
+//		
+//	}
+//
+//	@Override
+//	public void generated_DefaultWriteObject(IbisSerializationOutputStream writer, int lvl) throws IOException {
+//		writer.writeString(curBoard);
+//		writer.writeInt(playerX);
+//		writer.writeInt(playerY);
+//		writer.writeString(destBoard);
+//		writer.writeInt(moves);
+//		writer.writeInt(bound);
+//		writer.writeInt(width);
+//	}
+//
+//	@Override
+//	public void generated_WriteObject(IbisSerializationOutputStream writer) throws IOException {
+//		writer.writeString(curBoard);
+//		writer.writeInt(playerX);
+//		writer.writeInt(playerY);
+//		writer.writeString(destBoard);
+//		writer.writeInt(moves);
+//		writer.writeInt(bound);
+//		writer.writeInt(width);
+//		
+//	}
 }

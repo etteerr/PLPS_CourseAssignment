@@ -1,3 +1,0 @@
-#!/bin/sh
-
-exec  java -classpath ".:ipl-2.3/lib/*" -Xmx256M ibis.ipl.server.Server "$@"
